@@ -19,8 +19,8 @@
 #define JSON_BUFFER_SIZE 2048
 #define ARDUINOJSON_USE_LONG_LONG 1
 
-#undef QNODE_DEBUG_VERBOSE
-// #define QNODE_DEBUG_VERBOSE
+//#undef QNODE_DEBUG_VERBOSE
+#define QNODE_DEBUG_VERBOSE
 
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
@@ -210,6 +210,11 @@ public:
   void setSketchVersion( const String &initVer ) { sketchVersion = initVer; }
   String getSketchVersion() { return sketchVersion; }
 
+  void setDescription( const String &newDesc ) {
+    description = newDesc;
+  }
+  String getDescription() { return description; }
+
   void setLogLevel( uint8_t newLevel ) { logLevel = (newLevel > LOGLEVEL_DEBUG ? LOGLEVEL_DEBUG : newLevel);  }
   uint8_t getLogLevel() { return logLevel; }
   void setLogTopic(String newTopic) { logTopic = newTopic; }
@@ -328,6 +333,7 @@ protected:
   bool timeSet = false;
 
 private:
+  String description;
   String sketchVersion;
   WiFiUDP *ntpUdp = nullptr;
   bool ntpStarted = false;

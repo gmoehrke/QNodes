@@ -672,12 +672,22 @@ String TPLinkController::sendCommand( const String &cmd ) {
           auto error = deserializeJson( doc, result );
           if (!error) {
             if (cmd.equalsIgnoreCase("status")) {            
-              setState(doc["system"]["get_sysinfo"]["relay_state"].as<String>()=="1");
+              bool current = doc["system"]["get_sysinfo"]["relay_state"].as<String>()=="1";
+              if (current != switchState) {
+                if (current) { onItemEvent("state_update", "\"relay_state\":\"on\""); ; }
+                else { onItemEvent("state_update", "\"relay_state\":\"off\""); }
+              }
+              setState(current);
               // logMessage( "State:  " + String(switchState) );
             }
             else {
+              bool target = cmd.equalsIgnoreCase("on");
               if (doc["system"]["set_relay_state"]["err_code"].as<String>()=="0") {
-                setState( cmd.equalsIgnoreCase("on") );
+                onItemEvent("command_sent", "\"cmd\":\"" + cmd + "\"" );                                 
+                setState( target );
+              }
+              else {
+                onItemEvent("error" , "\"code\":" + doc["system"]["set_relay_state"]["err_code"].as<String>() );
               }
             }
           }

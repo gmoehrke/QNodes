@@ -500,7 +500,11 @@ void QNodeController::onConfig( const String &topic, const JsonObject &msg ) {
     logMessage( LOGLEVEL_INFO, "Request new host name:  "+msg["hostname"].as<String>()+" - Wifi willl reset..." );
     configNewHostName = msg["hostname"].as<String>();
   } 
-   
+
+  if (msg.containsKey("description")) {
+    setDescription(msg["description"].as<String>());
+  }
+
   if (msg.containsKey("items")) {
     logMessage("Creating Items:  ");
     for (auto ctx : msg["items"].as<JsonArray>()) {
@@ -631,9 +635,11 @@ void QNodeController::sendStateJson() {
           publishItem( baseTopic, "current_time", msgStr, PUB_TEXT );
   } 
   root["node_id"] = currHostName;
+  root["description"] = getDescription();
   root["firmware"] = getSketchVersion();
   publishItem( baseTopic, "firmware", getSketchVersion(), PUB_TEXT );
   publishItem( baseTopic, "node_id", currHostName, PUB_TEXT );
+  publishItem( baseTopic, "description", getDescription(), PUB_TEXT );
   publishItem( baseTopic, "chip_id", currChipID, PUB_TEXT );
   publishItem( baseTopic, "ip_address", currIPAddr, PUB_TEXT );
   publishItem( baseTopic, "mac_address", currMACAddr, PUB_TEXT );

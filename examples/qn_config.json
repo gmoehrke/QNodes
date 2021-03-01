@@ -1,0 +1,43 @@
+{
+  "Nodes" : [
+    {
+      "ID" : "ESP-DDEEFF",
+      "hostname" : "QNODE000",
+      "config" : {
+        "items" : [
+          {
+            "tag" : "HOST",
+            "config" : {
+              "statetopic" : "qn/nodes/QNODE000/status",
+              "commandtopic" : "qn/nodes/QNODE000/commands",
+              "eventtopic" : "qn/nodes/QNODE000/events"
+            }
+          },
+          {
+            "tag" : "PIR",
+            "id" : "MOTION1",
+            "config" : {
+              "statetopic" : "home/foyer/motion/state",
+              "commandtopic" : "home/foyer/motion/commands",
+              "eventtopic" : "home/foyer/motion/events",
+              "pirpin" : 13,
+              "timeout" : 300000
+            }
+          },
+          {
+            "tag" : "LED",
+            "config" : {
+              "statetopic" : "qn/nodes/QNODE000/LED/state",
+              "commandtopic" : "qn/nodes/ESP-DDEEFF/LED/commands",
+              "RGBPins" : {
+                "r" : 5,
+                "g" : 4,
+                "b" : 0
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
