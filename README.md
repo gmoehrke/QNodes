@@ -41,34 +41,51 @@ The PIR Item controller is probably one of the simpler examples to illustrate th
 
 home/room/motion/state:  { "motion":"off" }
 
+*Note that by default, state is published in JSON.  State output can be switched to publish "raw" text by adding "stateformat":"raw" in the items configuration.  In that case home/room/motion/state will just contain the text "off".*
+
 Once motion is detected, it will publish a "motion on" state and also 3 sub-topics giving some further detail on the new state:
 
-home/room/motion/state:  { "motion":"on" }
-home/room/motion/state/timeout:  60   <this is the number of seconds retaining until motion is turned off>
-home/room/motion/state/source: sensor <this is the source of what triggered the motion - more on this below>
-home/room/motion/state/override:  none <this is the override status - more on this below>
+| Topic | Value | Description
+|---------------------------------|--------------------------------|---------------------------------
+|home/room/motion/state | {"motion":"on"} |
+|home/room/motion/state/timeout|60|The number of seconds retaining until motion is turned off
+|home/room/motion/state/source|sensor|Source of what triggered the motion (sensor/external) *more on this below*
+|home/room/motion/state/override|none|Override status (on/off/none) *more on this below>*
+
 
 the home/room/motion/state/timeout value will continue be pulished each second until it reaches 0, at which point, we will get the following:
 
-home/room/motion.state:  { "motion":"off"}
-home/room/motion/state/timeout: 0
+ Topic | Value 
+|---------------------------------|--------------------------------
+home/room/motion.state|{"motion":"off"}
+home/room/motion/state/timeout|0
 
 If the controller is configured to accept commands on the topic home/room/motion/commands, I can send a command to trigger motion on the controller by publishing the following message:
 
-home/room/motion/commands:  { "trigger":"on" }
+ Topic | Command
+|---------------------------------|--------------------------------
+home/room/motion/commands|{"trigger":"on"}
 
 The state will be updated as follows:
 
-home/room/motion/state:  { "motion":"on" }
-home/room/motion/state/timeout:  60  
-home/room/motion/state/source: external
-home/room/motion/state/override:  none 
+ Topic | Value 
+|---------------------------------|--------------------------------
+home/room/motion/state|{"motion":"on"}
+home/room/motion/state/timeout|60  
+home/room/motion/state/source|external
+home/room/motion/state/override|none 
 
 The PIR item controller accepts the following commands, by default
 
-{ "timeout": nnn }  - where nnn is the number of milliseconds after triggered until motion is turned off
-{ "override": "none"/"on"/"off" } - sets override to on or off until set back to "none"
-{ } 
+Command | Description
+--------|------------
+{"timeout": nnn}|Set the timeout in milliseconds - motion will stay *on* until timeout counts down to 0.  Any sensor or external trigger received while motion is *on* will reset the timer back to the max timeout.
+{"override":"on"}| Sets override to on - the "motion" state will show *on* (regardless of sensor state) until override is changed to *off* or *none*
+{"override":"off"}| Sets override to *off* - the *motion* state will show *off* (regardless of sensor state) until override is changed to *on* or *none*
+{"override":"none"} | Sets override to *none* - the motion state is tied to the sensor and timeout status.  
+{"trigger":"on"} | Emulates a sensor hit - if motion was *off*, it is set to *on* and the timeout period begins
+{"trigger":"off"} | Emulates the timer reaching 0.  If motion is *on*, this sets it to *off* and sets current timeout to 0
+{"trigger":"off","temp_disable":nnn} | Same as above, but disables motion detection for nnn milliseconds after motion is set to *off*
 
 
 
