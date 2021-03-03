@@ -35,6 +35,43 @@ Each nodes contains a set of "Item Controllers".  These controllers are allocate
 
 Each item controller has a timer controller, which can control how often the controller will update.  Depending on the controller type, some may need to update every cycle, others may only need to update every few seconds, mintes or even hours.  The update cycle is where the controller will check hardware interfaces for state changes (ex. read the temperature, check for motion, read voltage, etc.)  Regardless of the update cycle, command messages are processed as they arrive on the associated topic, and events are generated as they occur (whether they arise as a result of a command or update operation).
 
+### Example - Motion Detection
+
+The PIR Item controller is probably one of the simpler examples to illustrate the basics of how the controllers work.  Once configured, it will publish basic status on the configured MQTT topic.  If configure to publish to the home/room/motion/state topic, when it starts it will publish the following:
+
+home/room/motion/state:  { "motion":"off" }
+
+Once motion is detected, it will publish a "motion on" state and also 3 sub-topics giving some further detail on the new state:
+
+home/room/motion/state:  { "motion":"on" }
+home/room/motion/state/timeout:  60   <this is the number of seconds retaining until motion is turned off>
+home/room/motion/state/source: sensor <this is the source of what triggered the motion - more on this below>
+home/room/motion/state/override:  none <this is the override status - more on this below>
+
+the home/room/motion/state/timeout value will continue be pulished each second until it reaches 0, at which point, we will get the following:
+
+home/room/motion.state:  { "motion":"off"}
+home/room/motion/state/timeout: 0
+
+If the controller is configured to accept commands on the topic home/room/motion/commands, I can send a command to trigger motion on the controller by publishing the following message:
+
+home/room/motion/commands:  { "trigger":"on" }
+
+The state will be updated as follows:
+
+home/room/motion/state:  { "motion":"on" }
+home/room/motion/state/timeout:  60  
+home/room/motion/state/source: external
+home/room/motion/state/override:  none 
+
+The PIR item controller accepts the following commands, by default
+
+{ "timeout": nnn }  - where nnn is the number of milliseconds after triggered until motion is turned off
+{ "override": "none"/"on"/"off" } - sets override to on or off until set back to "none"
+{ } 
+
+
+
 ## Basic Configuration
 
 WiFi and MQTT Connections are all handled internally within the framework.  The example sketch (examples/QNodeMaster.cpp) has constants setup for SSID, WiFi password, MQTT host and associated credentials.  These are passed into the constructor of the QNodeController object, which does all the work.  If desired, something like WiFiManager could be used to manage these independently - I chose not to wire those into this framework.  
