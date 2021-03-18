@@ -5,6 +5,33 @@
 #include "QNodes.h"
 #include "QNFactory.h"
 
+class QNodeEventMap {
+  public:
+    enum TargetType {TGT_LOCAL=0, TGT_MQTT=1};
+
+    QNodeEventMap() {}
+    QNodeEventMap( const String &evName, const TargetType &tTgt, const String &evTarget, const String &evPayload ) {
+      init(evName, tTgt, evTarget, evPayload);
+    }
+    QNodeEventMap( const QNodeEventMap &src ) : QNodeEventMap( src.eventName, src.tgtType, src.target, src.payload ) {}
+
+    virtual ~QNodeEventMap() { }
+
+    String getEventName() { return eventName; }
+    String getTarget() { return target; }
+    TargetType getTargetType() { return tgtType; }    
+    String getPayload() { return payload; }
+    void setPayload( const String &newPayload ) { payload=newPayload; }
+      
+    const QNodeEventMap& operator =(const QNodeEventMap &src ) { init( src.eventName, src.tgtType, src.target, src.payload ); return *this; }  
+  protected:
+    void init( const String &initEvName, const TargetType initTType, const String &initTarget, const String &initPayload ) { eventName=initEvName; tgtType = initTType, target=initTarget; payload=initPayload; }
+    String eventName = "";
+    TargetType tgtType = TGT_LOCAL;
+    String target = "";
+    String payload = "";
+};
+
 class QNodeItemController : public QNodeItem {
   friend QNodeController;
     
@@ -27,6 +54,9 @@ class QNodeItemController : public QNodeItem {
     QNodeItemController(const String &initTag) : QNodeItem( initTag ) {  
       statePubFormat[PUB_STATE] = PUB_JSON;
       statePubFormat[PUB_STATE_DETAIL] = PUB_TEXT;
+    }
+    ~QNodeItemController() {
+      cmdTopics.erase( cmdTopics.begin(), cmdTopics.end());
     }
 
     String getDescription() { if (description.length()==0) { return( getItemID() + " (" + getName() + ")" ); } else { return description; }}
@@ -81,11 +111,13 @@ class QNodeItemController : public QNodeItem {
     virtual void onItemAttach( QNodeController *owner ) override { addTopic( owner->getHostConfigBaseTopic()+"/"+getConfigSubtopic() ); }
   
     virtual boolean isCommandMessage( const String &topic ) { 
-      return topic.equals(cmdTopic) || 
+      return(
+             (std::find(cmdTopics.begin(), cmdTopics.end(), topic) != cmdTopics.end() ) ||
              topic.equals(LOCAL_BCAST_TOPIC) || 
              topic.equals(GLOBAL_BCAST_TOPIC) ||
              topic.equals(LOCAL_BCAST_TOPIC+getItemTag()) || topic.equals(LOCAL_BCAST_TOPIC+getItemID()) ||
-             topic.equals(GLOBAL_BCAST_TOPIC+getItemTag()) || topic.equals(GLOBAL_BCAST_TOPIC+getItemID()); 
+             topic.equals(GLOBAL_BCAST_TOPIC+getItemTag()) || topic.equals(GLOBAL_BCAST_TOPIC+getItemID())
+      );
     }
 
     //
@@ -143,10 +175,10 @@ class QNodeItemController : public QNodeItem {
     void command( const String &cmd, boolean bypass );
     void command( const String &cmd ) { command( cmd, false); }
     
-    virtual void onItemEvent(const String &eventName, const String &addtlAttributes );
-    virtual void onItemEvent(const String &eventName) { onItemEvent( eventName, "" ); }
+    virtual void logItemEvent(const String &eventName, const String &addtlAttributes );
+    virtual void logItemEvent(const String &eventName) { logItemEvent( eventName, "" ); }
 
-    virtual void onMessage( const String &topic, const String &message ) override { if (isCommandMessage(topic)) { onItemEvent( "Invalid Command Message" ); }}
+    virtual void onMessage( const String &topic, const String &message ) override { if (isCommandMessage(topic)) { logItemEvent( "Invalid Command Message" ); }}
 
     virtual void fillItemProperties( JsonObject &props ) override;
 
@@ -154,11 +186,11 @@ class QNodeItemController : public QNodeItem {
     PublishFormat statePubFormat[StatePubLevel::PUB_STATE_DETAIL+1];
     String stateTopic = "";
     String eventTopic = "";
-    String cmdTopic = ""; 
+    std::vector<String> cmdTopics = std::vector<String>(); 
+    std::vector<QNodeEventMap> eventMaps = std::vector<QNodeEventMap>();
     String currConfigStr = "";  
     time_t lastConfig = 0;   
     String lastConfigStr = "";   
 };
-
 
 #endif

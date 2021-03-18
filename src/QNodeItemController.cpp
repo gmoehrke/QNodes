@@ -30,6 +30,11 @@ void QNodeItemController::onItemConfig( const JsonObject &message) {
         String workTopic = message["statetopic"].as<String>();
         logMessage( String(F("  State topic: ")) +workTopic);
         stateTopic = workTopic;
+        if (message.containsKey("stateformat")) {
+          if (message["stateformat"].as<String>().equalsIgnoreCase("raw")) {
+            statePubFormat[PUB_STATE] = PUB_TEXT;
+          }
+        }
       }
       if (message.containsKey("eventtopic")) {
       String workTopic = message["eventtopic"].as<String>();
@@ -37,18 +42,32 @@ void QNodeItemController::onItemConfig( const JsonObject &message) {
       eventTopic = workTopic;
       }
       if (message.containsKey("commandtopic")) {
-        String workTopic = message["commandtopic"].as<String>();
-        logMessage( String(F("  Command topic: "))+workTopic);
-        if ((cmdTopic != workTopic) && (cmdTopic != "")) { removeTopic( cmdTopic ); }
-        cmdTopic = workTopic;
-        addTopic(workTopic);
+        // clear any existing topics added previously
+        for(auto topic : cmdTopics ) { removeTopic(topic); }
+        cmdTopics.erase(cmdTopics.begin(), cmdTopics.end());
+        if (message["commandtopic"].is<JsonArray>()) {
+          logMessage( String(F( "  Command topics: "))+"" );
+          for (auto ct : message["commandtopic"].as<JsonArray>()) {
+            String newTopic = ct.as<String>();
+            logMessage("      "+newTopic);
+            cmdTopics.push_back(newTopic);
+            addTopic(newTopic);
+          }
+        }
+        else {
+          String workTopic = message["commandtopic"].as<String>();
+          logMessage( String(F("  Command topic: "))+workTopic);        
+          //if ((cmdTopic != workTopic) && (cmdTopic != "")) { removeTopic( cmdTopic ); }
+          //cmdTopic = workTopic;
+          cmdTopics.push_back(workTopic);        
+          addTopic(workTopic);
+        }
       }
      logMessage( getItemTag() +F( " Controller: Done with base controller configuration.") );
       if (onControllerConfig( message )) {
         start(); 
         if ( message.containsKey("init") ) {
           logMessage(QNodeController::LOGLEVEL_DEBUG, getName() + " - Found init command - sending...");
-          //JsonObject ini = msg["init"];
           this->onItemCommand( message["init"].as<JsonObject>() );
         }
         else if (message.containsKey( "init_list" )) {
@@ -87,8 +106,11 @@ void QNodeItemController::directConfig( String stTopic, String evTopic, String c
     logMessage( String(F("  Event topic: "))+eventTopic);
   }
   if (cmTopic != "") {
-    cmdTopic = cmTopic;
-    logMessage( String(F("  Command topic: "))+cmdTopic);
+    // cmdTopic = cmTopic;
+    cmdTopics.erase(cmdTopics.begin(), cmdTopics.end());
+    cmdTopics.push_back(cmTopic);
+    addTopic(cmTopic);
+    logMessage( String(F("  Command topic: "))+cmTopic);
   }
   logMessage( getItemTag() + F(" Controller: Done with direct configuration.") );
   lastConfig = getOwner()->getTime();
@@ -111,7 +133,7 @@ void QNodeItemController::onItemStateDetail( const String detailName, const Json
   }
 }  
 
-void QNodeItemController::onItemEvent(const String &eventName, const String &addtlAttributes)  {
+void QNodeItemController::logItemEvent(const String &eventName, const String &addtlAttributes)  {
    if (eventTopic != "") {
      char dateStr[11];
      sprintf( dateStr, "%02d/%02d/%d", month(), day(), year() );
@@ -133,18 +155,18 @@ void QNodeItemController::onItemEvent(const String &eventName, const String &add
  }
 
  void QNodeItemController::command( const String &cmd, boolean bypass ) {
-   if (!bypass && cmdTopic != "") {
-     this->publish( cmdTopic, cmd, false );
+   if (!bypass && cmdTopics.size() > 0) {
+     this->publish( cmdTopics[0], cmd, false );
    }
    else {
   
      DynamicJsonDocument root(JSON_BUFFER_SIZE);     
      auto error = deserializeJson( root, cmd ); 
      if (!error) {
-       QNodeItem::onMessage(cmdTopic, root.to<JsonObject>());
+       QNodeItem::onItemCommand(root.to<JsonObject>());
      }
      else {
-        this->onMessage( cmdTopic, cmd );
+        this->onMessage( cmdTopics[0], cmd );
      }
    }
  }

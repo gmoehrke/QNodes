@@ -59,6 +59,7 @@ class QNodeObserver : virtual public QNodeObject {
   friend QNodeController;
   public:
     QNodeObserver() : QNodeObject() { topics = std::vector<String>(); }
+    ~QNodeObserver() { topics.erase(topics.begin(), topics.end()); }
     std::vector<String>& getTopicList() { return topics; }
     void addTopic(const String &newTopic );
     void removeTopic(const  String &topic );
@@ -139,7 +140,7 @@ class QNodeItem : public QNodeActor, public QNodeObserver {
     virtual void onItemStateChange( const JsonObject &stateMessage ) {}
     virtual void onItemConfig(const JsonObject &message) {}
     virtual void onItemCommand(const JsonObject &message) {}
-    virtual void onItemEvent(const String &eventName ) {}
+    virtual void logItemEvent(const String &eventName ) {}
     virtual void fillItemProperties( JsonObject &props ) {}
     //virtual void onItemUpdate() {}
 

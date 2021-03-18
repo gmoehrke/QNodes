@@ -75,13 +75,19 @@ void ESPHostController::updateFirmware(const String &url ) {
       }
   }
 
+
 void ESPHostController::onItemCommandElement( String context, String key, JsonVariant& value ) {
     String vStr = value.as<String>();
     String path = context + "." + key;
-    if (context.equals(".led1") || context.equals("led2")) {
-      MonoVariableLED& led = context.equals(".led1") ? leds.led1() : leds.led2();
-      if (key.equals("state")) { led.setState( vStr.equals("on") ); }
-      if (key.equals("level")) { led.setBrightness( value ); }
+    String logMsg;
+    if (context.equals(".led1") || context.equals(".led2")) {
+      MonoVariableLED& led = context.equals(".led1") ? leds.led1() : leds.led2();      
+      if (key.equals("state")) { 
+        led.setState( vStr.equals("on") );         
+      }
+      if (key.equals("level")) { 
+        led.setBrightness( value ); 
+      }
     }
     if (path.equals(".firmware")) { updateFirmware( vStr ); }
     if (path.equals(".restart") && (vStr.equals("yes")||vStr.equals("true"))) { ESP.restart(); }
@@ -92,6 +98,12 @@ void ESPHostController::onItemCommandElement( String context, String key, JsonVa
 boolean ESPHostController::onControllerConfig(const JsonObject &msg ) {
     leds.led1().setState(false);
     leds.led2().setState(false);
+    if (msg.containsKey("led1_pin")) {
+      leds.led1().setPin(msg["led1_pin"].as<uint8_t>());
+    }
+    if (msg.containsKey("led2_pin")) {
+      leds.led1().setPin(msg["led2_pin"].as<uint8_t>());
+    }
     return false;
   }
 
@@ -296,7 +308,7 @@ void PIRController::onSensorEvent( EventType event ) {
                           }                          
                           
     }
-    onItemEvent( stEvent );
+    logItemEvent( stEvent );
  } 
 
 void PIRController::update() {
@@ -586,7 +598,7 @@ void MochaX10Controller::onItemCommand( const JsonObject& message ) {
       if (message.containsKey("repeat")) { repeat = message["repeat"]; }
       for (uint8_t i=repeat; i > 0; i--) {
         commands.push_back(message["command"]);   
-        onItemEvent( "CommandAdded: "+String(commands.size()) + " commands queued" );     
+        logItemEvent( "CommandAdded: "+String(commands.size()) + " commands queued" );     
       }
     }
   }    
@@ -674,8 +686,8 @@ String TPLinkController::sendCommand( const String &cmd ) {
             if (cmd.equalsIgnoreCase("status")) {            
               bool current = doc["system"]["get_sysinfo"]["relay_state"].as<String>()=="1";
               if (current != switchState) {
-                if (current) { onItemEvent("State update: on"); ; }
-                else { onItemEvent("State update off"); }
+                if (current) { logItemEvent("State update: on"); ; }
+                else { logItemEvent("State update off"); }
               }
               setState(current);
               // logMessage( "State:  " + String(switchState) );
@@ -683,12 +695,12 @@ String TPLinkController::sendCommand( const String &cmd ) {
             else {
               bool target = cmd.equalsIgnoreCase("on");
               if (doc["system"]["set_relay_state"]["err_code"].as<String>()=="0") {
-                if (target) { onItemEvent("Command sent: on" ); } 
-                else { onItemEvent("Command sent: off" ); }                                 
+                if (target) { logItemEvent("Command sent: on" ); } 
+                else { logItemEvent("Command sent: off" ); }                                 
                 setState( target );
               }
               else {
-                onItemEvent("Command error" , "\"code\":" + doc["system"]["set_relay_state"]["err_code"].as<String>() );
+                logItemEvent("Command error" , "\"code\":" + doc["system"]["set_relay_state"]["err_code"].as<String>() );
               }
             }
           }
@@ -931,7 +943,7 @@ void QFXController::onFXEvent( const String &segment, FXEventType event, const S
         case FX_LOG               : { QNodeItemController::logMessage( QNodeController::LOGLEVEL_INFO, "" + name); }
       }
     if (stEvent != "")   {
-      onItemEvent( (segment =="" ? "" : segment + ": ") + name + " " + stEvent );
+      logItemEvent( (segment =="" ? "" : segment + ": ") + name + " " + stEvent );
     }
   }
 

@@ -84,13 +84,13 @@ void QNodeItem::start() {
   if (!started) {
     setInactive( false );
     started = true; 
-    onItemEvent(getName() + " Started update handler.");
+    logItemEvent(getName() + " Started update handler.");
   }
 } 
    
 void QNodeItem::stop() { 
   if (started) { 
-    onItemEvent(getName() + " Stopped update handler");
+    logItemEvent(getName() + " Stopped update handler");
     started = false; 
     setInactive( true );
   }
@@ -195,6 +195,8 @@ bool QNodeController::wifiConnected() {
 
 void QNodeController::endWifi() {
   logMessage("Wifi disconnecting...");
+  endNtp();
+  endMqtt();
   WiFi.disconnect();
 }
 

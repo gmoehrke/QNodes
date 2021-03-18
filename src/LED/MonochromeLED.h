@@ -20,6 +20,7 @@ class MonoBinaryLED {
     MonoBinaryLED( const uint8_t initPin, boolean initInvert, boolean initState ) : MonoBinaryLED( initPin, initInvert ) {
       writeState( initState );
     }
+    void setPin( uint8_t newPin ) { pin = newPin; pinMode(pin, OUTPUT); this->writeState(state); }
     virtual uint16_t getOffValue() { return inverted ? 1023 : 0; }
     virtual uint16_t getOnValue() { return inverted ? 0 : 1023; }
     boolean getState() { return state; }

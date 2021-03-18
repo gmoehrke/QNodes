@@ -8,11 +8,11 @@ Note:  This is a fully working project and all code is up-to-date.  Documentatio
 
 I developed this framework and firmware with a few simple goals in mind:
 
-    1.  Create a single firmware build that can be used on multiple ESP8266 modules, each with different components and functions
-    2.  Utilize MQTT for all communication and configuration of the devices
-    3.  Include logging capabilities for visibility into node activity
-    4.  Include OTA update capabilities so hardware doesn't have to be "touched" once deployed
-    5.  Support a variety of different hardware components (sensors, LEDs, relays and switches)
+  1.  Create a single firmware build that can be used on multiple ESP8266 modules, each with different components and functions
+  2.  Utilize MQTT for all communication and configuration of the devices
+  3.  Include logging capabilities for visibility into node activity
+  4.  Include OTA update capabilities so hardware doesn't have to be "touched" once deployed
+  5.  Support a variety of different hardware components (sensors, LEDs, relays and switches)
 
 QNodes is a set of Arduino/C++ classes that provides these capabilities.  The example found in examples/QNodeMaster.cpp is the main firmware sketch I currently have deployed in 10 nodes in my current configuration.  The framework currently has support for the following complonents:
 
@@ -35,9 +35,46 @@ Each nodes contains a set of "Item Controllers".  These controllers are allocate
 
 Each item controller has a timer controller, which can control how often the controller will update.  Depending on the controller type, some may need to update every cycle, others may only need to update every few seconds, mintes or even hours.  The update cycle is where the controller will check hardware interfaces for state changes (ex. read the temperature, check for motion, read voltage, etc.)  Regardless of the update cycle, command messages are processed as they arrive on the associated topic, and events are generated as they occur (whether they arise as a result of a command or update operation).
 
-### Example - Motion Detection
+### Example 1 - RGB LED
 
-The PIR Item controller is probably one of the simpler examples to illustrate the basics of how the controllers work.  Once configured, it will publish basic status on the configured MQTT topic.  If configure to publish to the home/room/motion/state topic, when it starts it will publish the following:
+Let's create at an example configuration to turn a single RGB LED on and off.  The RGBLEDController will handle that via MQTT without any additional coding.  The configuration is simple, just publish 2 JSON cofiguration messages to the appropriate MQTT topics (see the configuration sections below for details).  For now, we can get an example up and running without going into the details on the configuration, we do the following:
+
+
+1. Modify the examples/QNodesMaster.cpp to contain the SSID, key, and mqtt host/login/password information in your
+environment.  Once compiled and uploaded, the node will boot and begin looking for configuration messages.
+
+1. Determine the ID of the chip you are using (i.e. what it's hostname will be when it boots up).  This can be done a few ways.  
+    - Many boards simply use "ESP-" followed by the last 6 hex digits of the MAC Address.  So, if the MAC Address is FF:FF:FF:DD:EE:FF, the hostname will be "ESP-DDEEFF"
+    - When it boots up, each node will create a topic for logging named: qn/nodes/ESP-DDEEFF/log (where ESP-DDEEFF is the host name of the board)
+2. Publish the following messages to the appropriate MQTT topics:
+
+    Topic| Message | Notes
+    |----------|----------------|---------|
+    |qn/config/ESP-*DDEEFF*/config|`{"items":[{"tag":"HOST"},{"tag":"LED"}]}`|*DDEEFF* is replaced with the Chip ID of the ESP board
+    |qn/config/ESP-*DDEEFF*/config/LED|`{"statetopic": "qn/nodes/ESP-*DDEEFF*/LED/state", "commandtopic": "qn/nodes/ESP-*DDEEFF*/LED/commands"}`
+
+    These can be published from the command line on your mqtt host (if using Mosquitto) using the following commands:
+
+    ```
+    mosquitto_pub -t qn/nodes/ESP-DDEEFF/config -r -m '{"items":[{"tag":"HOST"},{"tag":"LED"}]}'
+    mosquitto_pub -t qn/nodes/ESP-DDEEFF/config/LED -r -m '{"statetopic": "qn/myLED/state", "commandtopic": "qn/myLED/commands"}' 
+
+The state of the LED is now published to **qn/MyLED/state**, and commands to control the LED can be sent/published to **qn/MyLED/commands**.  By default, the state is published as [R],[G],[B] with each value being between 0 and 1023.  To turn the LED on, at full intensity, we can publish the following message to the command topic:
+
+   ```json 
+   {  "color":{ "r":1023,"g":1023,"b":1023 } }
+   ```
+ 
+  using:
+
+   ```
+   mosquitto_pub -t qn/MyLED/commands -r -m '{"color":{ "r":1023,"g":1023,"b":1023}}'
+   ```
+
+
+### Example 2 - Motion Detection
+
+The PIR Item controller is probably one of the simpler examples to illustrate the basics of how the sensor controllers work.  Once configured, it will publish basic status on the configured MQTT topic.  If configure to publish to the home/room/motion/state topic, when it starts it will publish the following:
 
 home/room/motion/state:  { "motion":"off" }
 
@@ -86,6 +123,7 @@ Command | Description
 {"trigger":"on"} | Emulates a sensor hit - if motion was *off*, it is set to *on* and the timeout period begins
 {"trigger":"off"} | Emulates the timer reaching 0.  If motion is *on*, this sets it to *off* and sets current timeout to 0
 {"trigger":"off","temp_disable":nnn} | Same as above, but disables motion detection for nnn milliseconds after motion is set to *off*
+{"curr_timeout":nnn}|Set the timout of (only) the current cycle.  This will override the current countdown and set the timeout (in milliseconds) to restart at the specified value.  The new timeout will remain in effect until the timer counts down to 0 *or* a manual trigger:off or override command is received.
 
 
 

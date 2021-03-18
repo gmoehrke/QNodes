@@ -30,7 +30,7 @@
 #ifdef QNC_LEDSTRIP
 #include "FFXController.h"
 
-#define LED_BUILTIN_TWO     2
+// #define LED_BUILTIN_TWO     16
 #define NUM_LEDS_DEFAULT    100
 #define DATA_PIN_DEFAULT    5
 #define CHIPSET_DEFAULT     WS2811
@@ -52,7 +52,7 @@ class ESPLEDs {
     ESPLEDs() { }
   protected:
     MonoVariableLED ledBuiltin1 = MonoVariableLED( LED_BUILTIN, true, false );
-    MonoVariableLED ledBuiltin2 = MonoVariableLED( LED_BUILTIN_TWO, true, false );
+    MonoVariableLED ledBuiltin2 = MonoVariableLED( LED_BUILTIN_AUX, true, false );
   }; // class ESPLEDs
 
 class ESPHostController : public QNodeItemController {

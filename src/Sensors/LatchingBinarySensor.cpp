@@ -31,7 +31,7 @@ void LatchingBinarySensor::setCurrLatch( unsigned long newLatch ) {
 
 void LatchingBinarySensor::trigger( boolean tState ) {
   if (ovrState==OVERRIDE_NONE) {
-    boolean prevState = calcState( sensorState, ovrState, extTriggerState );
+    boolean prevState = getState(); //calcState( sensorState, ovrState, extTriggerState );
     extTriggerState = tState ? EXT_TRIGGER_ON : EXT_TRIGGER_OFF;
     if (tState) {
       latch(true);
@@ -39,7 +39,7 @@ void LatchingBinarySensor::trigger( boolean tState ) {
     else {
       unlatch(true);
     }
-    if (getState() != prevState) { onSensorStateChange( !prevState ); }
+    if (getState() != prevState) { this->onSensorStateChange( !prevState ); }
   }
 }
 
@@ -55,7 +55,7 @@ void LatchingBinarySensor::update() {
       onSensorEvent( sensorState ? SENS_ON : SENS_OFF );
     }
     if (latchTimer.isStarted() and latchTimer.isUp()) { unlatch(false); }
-    if (getState() != prevState) { onSensorStateChange( !prevState ); }
+    if (getState() != prevState) { this->onSensorStateChange( !prevState ); }
     if (extTriggerState != EXT_TRIGGER_NONE) { extTriggerState = EXT_TRIGGER_NONE; }
     onSensorUpdate();
     // Do this last so sensor updates come before timer updates if timer is just starting...
@@ -67,7 +67,7 @@ void LatchingBinarySensor::update() {
 }
 
 boolean LatchingBinarySensor::calcState(boolean sState, OverrideState orState, ExtTriggerState tState ) {
-  return ((((sState || latchTimer.isStarted() || tState==EXT_TRIGGER_ON) && orState == OVERRIDE_NONE) || (orState==OVERRIDE_ON))  && !(orState==OVERRIDE_OFF));
+  return (((((sState && (tState!=EXT_TRIGGER_OFF))|| latchTimer.isStarted()||tState==EXT_TRIGGER_ON) && orState == OVERRIDE_NONE) || (orState==OVERRIDE_ON)) && !(orState==OVERRIDE_OFF));
 }
 
 void LatchingBinarySensor::latch(bool external) {
