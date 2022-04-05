@@ -1,10 +1,15 @@
 #ifndef CORE_CONTROLLERS_H
 #define CORE_CONTROLLERS_H
 
+#define QNC_MONO_LED            // Include support for single pin monochrome LED w/variable brightness via PWM
 #define QNC_COLOR_LED           // Include support for 3 pin connected RGB LED 
 #define QNC_PIR                 // Include support for single pin infrared motion sensor
+
+#ifndef REPORT_VCC
 #define QNC_LDR                 // Include support for single pin light sensor (analog)
 #define QNC_VOLT                // Include support for voltage sensor (analog)
+#endif
+
 #define QNC_DHT                 // Include support for single pin DHT temp/humidity sensor (using DHT Sensor lib)
 #define QNC_RELAY               // Include support for single pin relay 
 #define QNC_OAS                 // Include support for single pin Obstacle Avoidance Sensor 
@@ -28,13 +33,15 @@
 #endif
 
 #ifdef QNC_LEDSTRIP
-#include "FFXController.h"
-
-// #define LED_BUILTIN_TWO     16
+#define FASTLED_ESP8266_RAW_PIN_ORDER
+//#define FASTLED_INTERRUPT_RETRY_COUNT 0
+//#define FASTLED_ESP8266_D1_PIN_ORDER
 #define NUM_LEDS_DEFAULT    100
-#define DATA_PIN_DEFAULT    5
+#define DATA_PIN_DEFAULT    D5
 #define CHIPSET_DEFAULT     WS2811
 #define COLOR_ORDER_DEFAULT BRG
+
+#include "FFXController.h"
 #endif
 
 class CoreControllers {
@@ -48,11 +55,15 @@ class CoreControllers {
 class ESPLEDs {
   public:
     MonoVariableLED &led1() { return ledBuiltin1; }
+    #ifdef NODEMCU 
     MonoVariableLED &led2() { return ledBuiltin2; }
+    #endif
     ESPLEDs() { }
   protected:
     MonoVariableLED ledBuiltin1 = MonoVariableLED( LED_BUILTIN, true, false );
+    #ifdef NODEMCU
     MonoVariableLED ledBuiltin2 = MonoVariableLED( LED_BUILTIN_AUX, true, false );
+    #endif
   }; // class ESPLEDs
 
 class ESPHostController : public QNodeItemController {
@@ -67,6 +78,26 @@ class ESPHostController : public QNodeItemController {
     ESPLEDs leds = ESPLEDs();
     void updateFirmware(const String &url );
 };  // class ESPHostController
+
+#ifdef QNC_MONO_LED 
+class MonoLEDController : public MonoVariableLED, public QNodeItemController {
+  public:
+    static void registerType();
+    MonoLEDController();
+    MonoLEDController( uint8_t p );
+    // Overrides from ColorLED
+    // virtual void setPin( uint8_t p );
+    virtual void onShow() override;    
+    // Overrides from QNodeItemController & QNodeItem
+    virtual boolean onControllerConfig(const JsonObject &msg ) override  ;
+    virtual void onItemCommand(const JsonObject &msg ) override ;    
+    virtual void update() override;
+
+  private:
+    //uint8_t pin = 0;
+    boolean initialized = false;
+};  // class monoLedController
+#endif
 
 
 #ifdef QNC_COLOR_LED
@@ -222,6 +253,9 @@ class TPLinkController : public QNodeItemController {
     static uint8_t initKey;
     bool switchState = false;
     static uint8_t buffer[];
+    unsigned long tineoutMillis = 2000;
+    StepTimer offlineTimer = StepTimer(60000);
+    
 
     static String decrypt( uint8_t* input );
     static uint8_t* encrypt( uint8_t* output, const String &input );
@@ -244,6 +278,7 @@ class QFXController : public QNodeItemController, public FFXController {
     virtual boolean onControllerConfig( const JsonObject &msg ) override;
     virtual void onItemCommandElement( String context, String key, JsonVariant& value ) override;
     virtual void onItemCommand( const JsonObject &msg ) override;
+    virtual void onItemStateUpdate() override;
     virtual void update() override;
   private:
     boolean configured = false;

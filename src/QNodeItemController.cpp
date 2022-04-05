@@ -12,23 +12,25 @@ QNFactory<QNodeItemController> *QNodeItemController::getFactory() {
 }
 
 void QNodeItemController::onItemConfig( const JsonObject &message) {
+    
     String configStr;
     serializeJson( message, configStr ); 
     /*
      * The configuration json is saved to a string and compared with the "new" one, to prevent re-configuration with the exact same settings if the 
      * exact same message is received again.
      */
+    
     if ( configStr != currConfigStr ) {
       currConfigStr = configStr;
-      logMessage(getItemTag() + F(" Controller: Processing MQTT configuration message: ") + configStr);
+      logMessage(QNodeController::LOGLEVEL_DEBUG, getItemTag() + F(" Controller: Processing configuration message: "));      
       if (message.containsKey("desc")) {
         String workdesc = message["desc"].as<String>();
         setDescription(workdesc);
-        logMessage("  Description: " + getDescription());
+        logMessage(QNodeController::LOGLEVEL_DEBUG, "  Description: " + getDescription());
       }
       if (message.containsKey("statetopic")) {
         String workTopic = message["statetopic"].as<String>();
-        logMessage( String(F("  State topic: ")) +workTopic);
+        logMessage( QNodeController::LOGLEVEL_DEBUG, String(F("  State topic: ")) +workTopic);
         stateTopic = workTopic;
         if (message.containsKey("stateformat")) {
           if (message["stateformat"].as<String>().equalsIgnoreCase("raw")) {
@@ -38,7 +40,7 @@ void QNodeItemController::onItemConfig( const JsonObject &message) {
       }
       if (message.containsKey("eventtopic")) {
       String workTopic = message["eventtopic"].as<String>();
-      logMessage( String(F("  Event topic: "))+workTopic);
+      logMessage( QNodeController::LOGLEVEL_DEBUG, String(F("  Event topic: "))+workTopic);
       eventTopic = workTopic;
       }
       if (message.containsKey("commandtopic")) {
@@ -49,29 +51,37 @@ void QNodeItemController::onItemConfig( const JsonObject &message) {
           logMessage( String(F( "  Command topics: "))+"" );
           for (auto ct : message["commandtopic"].as<JsonArray>()) {
             String newTopic = ct.as<String>();
-            logMessage("      "+newTopic);
+            logMessage(QNodeController::LOGLEVEL_DEBUG, "      "+newTopic);
             cmdTopics.push_back(newTopic);
             addTopic(newTopic);
           }
         }
         else {
           String workTopic = message["commandtopic"].as<String>();
-          logMessage( String(F("  Command topic: "))+workTopic);        
+          logMessage( QNodeController::LOGLEVEL_DEBUG, String(F("  Command topic: "))+workTopic);        
           //if ((cmdTopic != workTopic) && (cmdTopic != "")) { removeTopic( cmdTopic ); }
           //cmdTopic = workTopic;
           cmdTopics.push_back(workTopic);        
           addTopic(workTopic);
         }
       }
-     logMessage( getItemTag() +F( " Controller: Done with base controller configuration.") );
-      if (onControllerConfig( message )) {
-        start(); 
+      logMessage(QNodeController::LOGLEVEL_DEBUG, getItemTag() +F( " Controller: Done with base controller configuration.") );
+      if (this->onControllerConfig( message )) {
+        logMessage(QNodeController::LOGLEVEL_DEBUG, "Starting Item Controller...");
+        this->start(); 
+        #ifdef QNODE_DEBUG_VERBOSE
+        logMessage(QNodeController::LOGLEVEL_DEBUG"  Item started!");
+        #endif
         if ( message.containsKey("init") ) {
+          #ifdef QNODE_DEBUG_VERBOSE
           logMessage(QNodeController::LOGLEVEL_DEBUG, getName() + " - Found init command - sending...");
+          #endif
           this->onItemCommand( message["init"].as<JsonObject>() );
         }
         else if (message.containsKey( "init_list" )) {
+          #ifdef QNODE_DEBUG_VERBOSE
           logMessage(QNodeController::LOGLEVEL_DEBUG, getName() + " - Found init commands - sending...");
+          #endif
           for (auto cfg : message["init_list"].as<JsonArray>()) {
             this->onItemCommand(cfg.as<JsonObject>());
           }
@@ -89,30 +99,31 @@ void QNodeItemController::onItemConfig( const JsonObject &message) {
       String secondStr = seconds < 10 ? "0" + String(seconds) : String(seconds);
       String timeStr = hoursStr + ":" + minuteStr + ":" + secondStr;
       lastConfigStr = String(dateStr)+" "+timeStr;
+      logMessage(QNodeController::LOGLEVEL_DEBUG, "Setting last configuation to:  " + lastConfigStr);
    }
    else {
-    logMessage("  Configuration has not changed:  Skipping controller configuration.");
+    logMessage(QNodeController::LOGLEVEL_DEBUG, "  Configuration has not changed:  Skipping controller configuration.");
    }
  }
 
 void QNodeItemController::directConfig( String stTopic, String evTopic, String cmTopic ) {
-  logMessage(getItemTag() + F(" Controller: Processing MQTT configuration message: "));    
+  logMessage(QNodeController::LOGLEVEL_DEBUG, getItemTag() + F(" Controller: Processing MQTT configuration message: "));    
   if (stTopic != "") {
     stateTopic = stTopic;
-    logMessage( String(F("  State topic: "))+stateTopic);
+    logMessage( QNodeController::LOGLEVEL_DEBUG, String(F("  State topic: "))+stateTopic);
   }
   if (evTopic != "") {
     eventTopic = evTopic;
-    logMessage( String(F("  Event topic: "))+eventTopic);
+    logMessage( QNodeController::LOGLEVEL_DEBUG, String(F("  Event topic: "))+eventTopic);
   }
   if (cmTopic != "") {
     // cmdTopic = cmTopic;
     cmdTopics.erase(cmdTopics.begin(), cmdTopics.end());
     cmdTopics.push_back(cmTopic);
     addTopic(cmTopic);
-    logMessage( String(F("  Command topic: "))+cmTopic);
+    logMessage( QNodeController::LOGLEVEL_DEBUG, String(F("  Command topic: "))+cmTopic);
   }
-  logMessage( getItemTag() + F(" Controller: Done with direct configuration.") );
+  logMessage( QNodeController::LOGLEVEL_DEBUG, getItemTag() + F(" Controller: Done with direct configuration.") );
   lastConfig = getOwner()->getTime();
   start();
 }
@@ -120,7 +131,7 @@ void QNodeItemController::directConfig( String stTopic, String evTopic, String c
 void QNodeItemController::onItemStateDetail(const String &detailName, const String &detailValue ) {
   if (stateTopic != "") {
      String topic = stateTopic;
-     publishItem( topic, detailName, detailValue, statePubFormat[PUB_STATE_DETAIL] );
+     this->publishItem( topic, detailName, detailValue, statePubFormat[PUB_STATE_DETAIL] );
   }
 }
 
@@ -135,9 +146,7 @@ void QNodeItemController::onItemStateDetail( const String detailName, const Json
 
 void QNodeItemController::logItemEvent(const String &eventName, const String &addtlAttributes)  {
    if (eventTopic != "") {
-     char dateStr[11];
-     sprintf( dateStr, "%02d/%02d/%d", month(), day(), year() );
-     String timeStr = String(dateStr)+" "+getOwner()->getNTPClient()->getFormattedTime();
+     String timeStr = getOwner()->getFormattedTimestamp();
      String attr = "";
      if (!(addtlAttributes.equals(""))) {
         attr = ",";

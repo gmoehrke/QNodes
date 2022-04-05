@@ -7,6 +7,9 @@
 
 void CoreControllers::registerControllers() { 
       ESPHostController::registerType();
+      #ifdef QNC_MONO_LED
+      MonoLEDController::registerType();
+      #endif
       #ifdef QNC_COLOR_LED
       RGBLEDController::registerType();
       #endif
@@ -51,8 +54,10 @@ ESPHostController::ESPHostController() : QNodeItemController( "HOST" ) {
   }
 
 void ESPHostController::updateFirmware(const String &url ) {
-      logMessage("Firmware Update:  ");
-      logMessage("  Downloading from: " + url );
+      String stMessage;
+      logMessage( "Firmware Update:  ");
+      stMessage = "  Downloading from: " + url; 
+      logMessage(stMessage);
       logMessage("  System will reset... " );
       ESPhttpUpdate.setLedPin( D3, 10 );
       ESPhttpUpdate.rebootOnUpdate( true );
@@ -81,7 +86,12 @@ void ESPHostController::onItemCommandElement( String context, String key, JsonVa
     String path = context + "." + key;
     String logMsg;
     if (context.equals(".led1") || context.equals(".led2")) {
+      #ifdef NODEMCU
       MonoVariableLED& led = context.equals(".led1") ? leds.led1() : leds.led2();      
+      #else
+      MonoVariableLED& led = leds.led1();
+      #endif
+
       if (key.equals("state")) { 
         led.setState( vStr.equals("on") );         
       }
@@ -97,15 +107,75 @@ void ESPHostController::onItemCommandElement( String context, String key, JsonVa
 
 boolean ESPHostController::onControllerConfig(const JsonObject &msg ) {
     leds.led1().setState(false);
+    #ifdef NODEMCU
     leds.led2().setState(false);
+    #endif
     if (msg.containsKey("led1_pin")) {
       leds.led1().setPin(msg["led1_pin"].as<uint8_t>());
     }
+    #ifdef NODEMCU
     if (msg.containsKey("led2_pin")) {
-      leds.led1().setPin(msg["led2_pin"].as<uint8_t>());
+      leds.led2().setPin(msg["led2_pin"].as<uint8_t>());
     }
+    #endif
     return false;
   }
+
+//  *********** MonoLEDController methods
+#ifdef QNC_MONO_LED
+void MonoLEDController::registerType() {
+  QNodeItemController::getFactory()->registerType< MonoLEDController >("MONOLED");  
+}
+
+MonoLEDController::MonoLEDController() : MonoVariableLED(D1), QNodeItemController( "MONOLED" ) {      
+      setName(String(F("Monochrome LED Controller")));
+      setUpdateInterval(15);
+  }
+    
+MonoLEDController::MonoLEDController( uint8_t p ) : MonoLEDController() {
+      setPin( p );
+  }
+
+boolean MonoLEDController::onControllerConfig(const JsonObject &msg ) {
+    if (msg.containsKey("pin")) {
+      setPin( msg["pin"] );
+    }
+    else {
+        setPin( D1 );
+    }
+    return true;
+  }
+
+void MonoLEDController::onItemCommand(const JsonObject &msg ) {      
+      String st = F("MonoLEDController: Command received");
+      logMessage( st );
+      if (msg.containsKey("enable")) {
+        if (msg["enable"] == "yes") { start(); }
+        else if (msg["enable"] != "yes") { stop(); setBrightness(255); }
+      }
+      if (msg.containsKey("brightness")) {        
+        setBrightness(msg["brightness"], (msg.containsKey("fade") ? msg["fade"] : 0));
+      }
+      if (msg.containsKey("bright_pct")) {        
+        setBrightness(fixed_map(msg["bright_pct"], 0, 100, 0, 255), (msg.containsKey("fade") ? msg["fade"] : 0));
+      }
+    DynamicJsonDocument doc(JSON_BUFFER_SIZE); 
+    JsonObject root = doc.to<JsonObject>();   
+    root["brightness"] = getBrightness();
+    root["bright_pct"] = fixed_map(getBrightness(), 0, 255, 0, 100) ;
+    onItemStateChange(root);
+  }
+
+void MonoLEDController::onShow() {
+    // onItemStateChange( "brightness", String(getBrightness()) );    
+    MonoVariableLED::onShow();
+}   
+
+void MonoLEDController::update() {
+    MonoVariableLED::update();
+} 
+#endif
+
 
 //  *********** RGBLEDController methods
 #ifdef QNC_COLOR_LED
@@ -213,7 +283,8 @@ boolean PIRController::onControllerConfig( const JsonObject &msg ) {
           LatchingBinarySensor::stop();
           setPin( msg["pirpin"] );
           String st = F("  Motion sensor reading on pin: "); 
-          logMessage( st + String(getPin()) );
+          st = st + String(getPin());
+          logMessage( st );
           LatchingBinarySensor::start();
         }
         if (msg.containsKey("timeout")) {
@@ -240,7 +311,8 @@ void PIRController::onItemCommand( const JsonObject& message ) {
       }
       if (message.containsKey("timeout")) {
         unsigned long toval = message["timeout"];
-        logMessage("Timeout command setting to:"+String(toval));
+        String val = "Timeout command setting to: "+String(toval);
+        logMessage(val);
         setLatch( toval );
       }
       if (message.containsKey("curr_timeout")) {
@@ -340,13 +412,14 @@ boolean LDRController::onControllerConfig( const JsonObject &msg ) {
         if (msg.containsKey("inverted")) {
           setInverted( msg["inverted"]=="yes" );
           String st = F("LDR sensor value inverted: ");
-          logMessage( st + (getInverted() ? "yes" : "no") );
+          st = st + (getInverted() ? "yes" : "no");
+          logMessage( st );
         }
         if (msg.containsKey("ldrpin")) {
           AnalogSensor::stop();
           setPin( msg["ldrpin"] );
-          String st = F("  LDR sensor reading on pin: ");
-          logMessage( st  + String(getPin()) );
+          String st = "  LDR sensor reading on pin: " + String(getPin());
+          logMessage( st  );
           setUpdateInterval(1000);
           AnalogSensor::setReadInterval(5000);
           AnalogSensor::start();
@@ -381,21 +454,21 @@ boolean VSensorController::onControllerConfig( const JsonObject &msg ) {
         if (msg.containsKey("pin")) {
           AnalogSensor::stop();
           setPin( msg["pin"] );
-          String st = F("  Voltage sensor reading on pin: ");
-          logMessage( st  + String(getPin()) );
+          String st = "  Voltage sensor reading on pin: " + String(getPin());
+          logMessage( st );
           setUpdateInterval(1000);
           AnalogSensor::setReadInterval(1000);
           AnalogSensor::start();
         }
         if (msg.containsKey("zero_offset")) {
           zeroOffset = msg["zero_offset"];
-          String st = F("  Voltage sensor calibration offset: ");
-          logMessage( st  + String(zeroOffset) );
+          String st = "  Voltage sensor calibration offset: " + String(zeroOffset) ;
+          logMessage( st );
         }
         if (msg.containsKey("multiplier")) {
           voltageMultiplier = msg["multiplier"];
-          String st = F("  Voltage sensor multiplier: ");
-          logMessage( st  + String(voltageMultiplier) );
+          String st = "  Voltage sensor multiplier: " + String(voltageMultiplier);
+          logMessage( st );
         }
         return true;
   }  
@@ -425,8 +498,8 @@ boolean OASController::onControllerConfig( const JsonObject &msg ) {
         if (msg.containsKey("oaspin")) {
           BinarySensor::stop();
           setPin( msg["oaspin"] );
-          String st = F("  Obstacle sensor reading on pin: ");
-          logMessage( st + String(getPin()) );
+          String st = "  Obstacle sensor reading on pin: " + String(getPin());
+          logMessage( st );
           BinarySensor::setReadInterval(500);
           setUpdateInterval(500);
           BinarySensor::start();
@@ -470,8 +543,8 @@ boolean DHTController::onControllerConfig( const JsonObject &msg ) {
           DHTSensor::stop();
           setPin( msg["dhtpin"] );
           if (msg["dhttype"]) { setDHTType( msg["dhttype"] ); } else { setDHTType( DHTesp::DHT22 ); }
-          String st = String(F("  DHT sensor reading on pin: "));
-          logMessage( st + String(getPin()) );
+          String st = String(F("  DHT sensor reading on pin: ")) + String(getPin());
+          logMessage( st );
           setUpdateInterval(30000);
           DHTSensor::setReadInterval(10000);
           DHTSensor::start();
@@ -509,8 +582,8 @@ boolean RelayController::onControllerConfig( const JsonObject &msg ) {
         if (msg.containsKey("rlypin")) {
           pin =  msg["rlypin"];
           pinMode( pin, OUTPUT );
-          String st = String(F("  relay writing on pin: "));
-          logMessage( st + String(pin) );
+          String st = String(F("  relay writing on pin: ")) + String(pin);
+          logMessage( st );
           digitalWrite( pin, relayState ? onValue : offValue );
         }
         return true;
@@ -551,7 +624,8 @@ String MochaX10Controller::sendX10Command( String cmd ) {
     unsigned long timeout;
     WiFiClient client;
     if (client.connect( server, port )) {
-      logMessage("X10 Controller:  Sending command to " + server + ":" + cmd );
+      String st = "X10 Controller:  Sending command to " + server + ":" + cmd; 
+      logMessage(st);
       client.print( String(cmd+"\r\n").c_str() );
       
       timeout = GET_TIME_MILLIS_ABS+5000;
@@ -581,13 +655,13 @@ String MochaX10Controller::sendX10Command( String cmd ) {
 boolean MochaX10Controller::onControllerConfig( const JsonObject &msg ) {
         if (msg.containsKey("server")) {
           server =  msg["server"].as<String>();
-          String st = String(F("  server: "));
-          logMessage( st + server );
+          String st = String(F("  server: ")) + server;
+          logMessage( st );
         }
         if (msg.containsKey("port")) {
           port =  msg["port"];
-          String st = String(F("  port: "));
-          logMessage( st + String(port) );
+          String st = String(F("  port: ")) + String(port);
+          logMessage( st );
         }
         return true;
   }
@@ -644,80 +718,90 @@ String TPLinkController::sendCommand( const String &cmd ) {
     String command;
     uint16_t bytesRead;
     
-    if (cmd.equalsIgnoreCase("on")) { command = F("{\"system\":{\"set_relay_state\":{\"state\":1}}}"); }
-    else if (cmd.equalsIgnoreCase("off")) { command = F("{\"system\":{\"set_relay_state\":{\"state\":0}}}"); }
-    else { command = F("{\"system\":{\"get_sysinfo\":{}}}"); }
-    // logMessage("TPLink Controller:  Connecting to " + host + ":" + cmd );
-    if (client.connect( host, port )) {
-      client.setSync(true);
-      // logMessage("Message:  " + command);  
-      // logMessage("Encrypting.");
-      encrypt( buffer, command );
-      client.write(buffer, static_cast<size_t>(command.length()+4u) );
-      // logMessage("Sent: " + command );
-      // logMessage("Waiting for response...");
-      timeout = GET_TIME_MILLIS_ABS+5000;
-      while ((GET_TIME_MILLIS_ABS <= timeout) && (client.available()==0)) { 
-        delay(5);
-      }
-      bytesRead = 0;
-      uint32_t expected = 4;
-      timeout = GET_TIME_MILLIS_ABS+5000;
-      while ((GET_TIME_MILLIS_ABS <= timeout) && (bytesRead<expected)) {
-          if (client.available()) {
-            buffer[bytesRead] = static_cast<uint8_t>(client.read()); 
-            bytesRead++;   
-            if (bytesRead==4) {
-              expected = 4 + ((uint32_t)buffer[0] << 24 | (uint32_t)buffer[1] << 16 | (uint32_t)buffer[2] << 8 | (uint32_t)buffer[3]);
-            }
-          }
-          else {
-            delay(1);
-          }
-      }            
-      //logMessage("Read " + String(bytesRead) + " bytes, expected " + String(expected) + " bytes."); 
-      if (bytesRead==expected) {
-        result = decrypt(buffer);
-        if (result.length()>0) {
-          // logMessage("Decrypted: " + result + "<end>");
-          DynamicJsonDocument doc(JSON_BUFFER_SIZE);
-          auto error = deserializeJson( doc, result );
-          if (!error) {
-            if (cmd.equalsIgnoreCase("status")) {            
-              bool current = doc["system"]["get_sysinfo"]["relay_state"].as<String>()=="1";
-              if (current != switchState) {
-                if (current) { logItemEvent("State update: on"); ; }
-                else { logItemEvent("State update off"); }
+    if (offlineTimer.isStarted() && offlineTimer.isUp()) {
+      offlineTimer.stop();
+    }
+    if (!offlineTimer.isStarted()) {
+      if (cmd.equalsIgnoreCase("on")) { command = F("{\"system\":{\"set_relay_state\":{\"state\":1}}}"); }
+      else if (cmd.equalsIgnoreCase("off")) { command = F("{\"system\":{\"set_relay_state\":{\"state\":0}}}"); }
+      else { command = F("{\"system\":{\"get_sysinfo\":{}}}"); }
+      // logMessage("TPLink Controller:  Connecting to " + host + ":" + cmd );
+      if (client.connect( host, port )) {
+        client.setSync(true);
+        // logMessage("Message:  " + command);  
+        // logMessage("Encrypting.");
+        encrypt( buffer, command );
+        client.write(buffer, static_cast<size_t>(command.length()+4u) );
+        // logMessage("Sent: " + command );
+        // logMessage("Waiting for response...");
+        timeout = GET_TIME_MILLIS_ABS+tineoutMillis;
+        while ((GET_TIME_MILLIS_ABS <= timeout) && (client.available()==0)) { 
+          delay(5);
+        }
+        bytesRead = 0;
+        uint32_t expected = 4;
+        timeout = GET_TIME_MILLIS_ABS+tineoutMillis;
+        while ((GET_TIME_MILLIS_ABS <= timeout) && (bytesRead<expected)) {
+            if (client.available()) {
+              buffer[bytesRead] = static_cast<uint8_t>(client.read()); 
+              bytesRead++;   
+              if (bytesRead==4) {
+                expected = 4 + ((uint32_t)buffer[0] << 24 | (uint32_t)buffer[1] << 16 | (uint32_t)buffer[2] << 8 | (uint32_t)buffer[3]);
               }
-              setState(current);
-              // logMessage( "State:  " + String(switchState) );
             }
             else {
-              bool target = cmd.equalsIgnoreCase("on");
-              if (doc["system"]["set_relay_state"]["err_code"].as<String>()=="0") {
-                if (target) { logItemEvent("Command sent: on" ); } 
-                else { logItemEvent("Command sent: off" ); }                                 
-                setState( target );
+              delay(1);
+            }
+        }            
+        //logMessage("Read " + String(bytesRead) + " bytes, expected " + String(expected) + " bytes."); 
+        if (bytesRead==expected) {
+          result = decrypt(buffer);
+          if (result.length()>0) {
+            // logMessage("Decrypted: " + result + "<end>");
+            DynamicJsonDocument doc(JSON_BUFFER_SIZE);
+            auto error = deserializeJson( doc, result );
+            if (!error) {
+              if (cmd.equalsIgnoreCase("status")) {            
+                bool current = doc["system"]["get_sysinfo"]["relay_state"].as<String>()=="1";
+                if (current != switchState) {
+                  if (current) { logItemEvent("State update: on"); ; }
+                  else { logItemEvent("State update off"); }
+                }
+                setState(current);
+                // logMessage( "State:  " + String(switchState) );
               }
               else {
-                logItemEvent("Command error" , "\"code\":" + doc["system"]["set_relay_state"]["err_code"].as<String>() );
+                bool target = cmd.equalsIgnoreCase("on");
+                if (doc["system"]["set_relay_state"]["err_code"].as<String>()=="0") {
+                  if (target) { logItemEvent("Command sent: on" ); } 
+                  else { logItemEvent("Command sent: off" ); }                                 
+                  setState( target );
+                  if (offlineTimer.isStarted()) { offlineTimer.stop(); }
+                }
+                else {
+                  logItemEvent("Command error" , "\"code\":" + doc["system"]["set_relay_state"]["err_code"].as<String>() );                  
+                }
               }
             }
           }
+          logMessage( QNodeController::LOGLEVEL_DEBUG, getDescription() + " : " + cmd + " - relay status from host " + host + " : "  + static_cast<String>(switchState ? "ON" : "OFF") );                
         }
-        logMessage( getDescription() + " : " + cmd + " - relay status from host " + host + " : "  + static_cast<String>(switchState ? "ON" : "OFF") );                
+        else {
+          result = "Timed-out waiting for response:  " + String(bytesRead) +" of " + String(expected) + " bytes read.";
+          logMessage(QNodeController::LOGLEVEL_INFO, result);
+          if (offlineTimer.isStarted()) { offlineTimer.step(); }
+          else { offlineTimer.start(); }
+        }
+        if (client.connected()) { 
+          client.stop(); 
+        }            
       }
       else {
-        result = "Timed-out waiting for response:  " + String(bytesRead) +" of " + String(expected) + " bytes read.";
-        logMessage(result);
+        result = "Couldn't connect to "+host+" on port " + String(port);
+        logMessage(QNodeController::LOGLEVEL_INFO,result);
+        if (offlineTimer.isStarted()) { offlineTimer.step(); }
+        else { offlineTimer.start(); }
       }
-      if (client.connected()) { 
-        client.stop(); 
-      }            
-    }
-    else {
-      result = "Couldn't connect to "+host+" on port " + String(port);
-      logMessage(result);
     }
   return result;
 }
@@ -811,8 +895,7 @@ boolean QFXController::onControllerConfig( const JsonObject &msg ) {
           leds = nullptr; 
         }
         logMessage(QNodeController::LOGLEVEL_INFO, "Allocating LED buffer: " + String(ESP.getFreeHeap()) + " available heap.  Leds: " + String(pixels) );
-        leds = new CRGB[pixels]; 
-        
+        leds = new CRGB[pixels];         
         fill_solid( leds, pixels, CRGB::Black );
         logMessage(QNodeController::LOGLEVEL_INFO, "LED Buffer allocated: " + String(ESP.getFreeHeap()) + " available heap.  Leds:  " + String(pixels) );
         if (msg["colororder"] == "brg") { 
@@ -845,13 +928,19 @@ boolean QFXController::onControllerConfig( const JsonObject &msg ) {
             }
           }
         } 
-        QNodeItemController::start();         
+        this->start();         
         FFXController::update();
+        #ifdef QNODE_DEBUG_VERBOSE
+        logMessage(QNodeController::LOGLEVEL_DEBUG,"Done with LED Controller config.");
+        #endif
       return true;
   }
 
 void QFXController::onFXStateChange(FFXSegment *segment) {
-    markLongOpStart();
+    #ifdef QNODE_DEBUG_VERBOSE
+    logMessage(QNodeController::LOGLEVEL_DEBUG,"Start onFXStateChange()");
+    #endif
+    this->markLongOpStart();
     DynamicJsonDocument doc(JSON_BUFFER_SIZE); 
     JsonObject root = doc.to<JsonObject>();   
     FFXSegment *currSeg = segment;  
@@ -859,9 +948,9 @@ void QFXController::onFXStateChange(FFXSegment *segment) {
     root["segment"] = currSeg->getTag();
     root["effect"] = currEffect->getFXName();
     root["effectid"]= currEffect->getFXID();
-    root["brightness"] = currSeg->getBrightness();
+    root["brightness"] = currSeg->getSetBrightness();
     if (!currSeg->isPrimary()) { root["seg_dimming"] = (currSeg->hasDimmer() ? "on" : "off"); }
-    root["pct_brightness"] = fixed_map( getBrightness(), 0, 255, 0, 100 );    
+    root["pct_brightness"] = fixed_map( currSeg->getSetBrightness(), 0, 255, 0, 100 );    
     if (currSeg != getPrimarySegment()) { root["opacity"] = currSeg->getOpacity(); }
     root["pct_speed"] = fixed_map( currEffect->getSpeed(), 0, 255, 0, 100 );
     root["speed"] = currEffect->getSpeed();
@@ -917,13 +1006,16 @@ void QFXController::onFXStateChange(FFXSegment *segment) {
         nested["b"] = currPal[i].b;
       }
     }
-    if (segment==getPrimarySegment()) {
-      onItemStateChange( root );
+    logMessage(QNodeController::LOGLEVEL_DEBUG, "Sending state for segment "+ segment->getTag());
+    if (this->getOwner()->mqttConnected()) {
+      if (segment==getPrimarySegment()) {
+        this->onItemStateChange( root );
+      }
+      else {
+        this->onItemStateDetail( segment->getTag(), root );
+      }
     }
-    else {
-      onItemStateDetail( currSeg->getTag(), root );
-    }
-    markLongOpEnd();
+    this->markLongOpEnd();
     //localBroadcast( "{\"color\":{\"r\":1023,\"g\":512,\"b\":0},\"flash\": {\"duration\":30,\"repeat\":1, \"lag\":0} }", "LED");
   }
 
@@ -941,6 +1033,8 @@ void QFXController::onFXEvent( const String &segment, FXEventType event, const S
         case FX_PARAM_CHANGE      : { stEvent = "Parameter changed: "+name; break; }
         case FX_BRIGHTNESS_CHANGED: { stEvent = F("Brightness Changed"); break; }
         case FX_LOG               : { QNodeItemController::logMessage( QNodeController::LOGLEVEL_INFO, "" + name); }
+        case FX_LOCAL_BRIGHTNESS_ENABLED: { break; }
+        case FX_OPACITY_CHANGED : { break; }
       }
     if (stEvent != "")   {
       logItemEvent( (segment =="" ? "" : segment + ": ") + name + " " + stEvent );
@@ -1064,11 +1158,17 @@ void QFXController::onItemCommand( const JsonObject &msg ) {
             newColor.v = msg["color"]["v"] | newColor.v;
             currEffect->getFXColor().setCHSV( newColor );
           }
-          else {
-            String cpal =  msg["color"]["palette"];
-            if (cpal.equals("rainbow")) { currEffect->getFXColor().setPalette( RainbowColors_p, ccolors ); }
-            else if (cpal.equals("multi")) { currEffect->getFXColor().setPalette( ::Multi_p, ::Multi_size ); }
-            else if (cpal.equals("rwb")) { currEffect->getFXColor().setPalette( ::rwb_p, ::rwb_size ); }
+          else if (msg["color"].containsKey("palette")) {
+            String cpal =  msg["color"]["palette"]["name"];
+            int crange = 0;
+            if (msg["color"]["palette"].containsKey("size")) {
+              crange = msg["color"]["palette"]["size"];
+            }
+            if (cpal.equals("rainbow")) { currEffect->getFXColor().setPalette( RainbowColors_p, (crange==0 ? ccolors : crange) ); }
+            else if (cpal.equals("multi")) { currEffect->getFXColor().setPalette( ::Multi_p, (crange==0 ? ::Multi_size : crange) ); }
+            else if (cpal.equals("rwb")) { currEffect->getFXColor().setPalette( ::rwb_p, (crange==0 ? ::rwb_size : crange) ); }
+            else if (cpal.equals("valentine")) { currEffect->getFXColor().setPalette( ::Valentine_p, (crange==0 ? ::valentine_size : crange) ); }
+            else if (cpal.equals("irish")) { currEffect->getFXColor().setPalette( ::Irish_p, (crange==0 ? ::irish_size : crange) ); }
             else { currEffect->getFXColor().setPalette(  NamedPalettes::getInstance()[cpal]); }
           }
           if ( ccolors != 0) { currEffect->getFXColor().setPaletteRange( ccolors ); }
@@ -1134,6 +1234,11 @@ void QFXController::onItemCommand( const JsonObject &msg ) {
         FastLED.setCorrection( CRGB(msg["correction"]["r"],msg["correction"]["g"],msg["correction"]["b"]) );
       }
     }
+}
+void QFXController::onItemStateUpdate() {
+  for (auto seg : segments) {
+    this->onFXStateChange(seg);
+  }
 }
 
 void QFXController::update() {

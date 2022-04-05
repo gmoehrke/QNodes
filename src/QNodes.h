@@ -1,6 +1,7 @@
 #ifndef QNODES_H
 #define QNODES_H
 
+#define QNODE_VERSION F("1.3.0")
 /* 
  #define MQTT_MAX_PACKET_SIZE 768 // Note:  This DOES NOT overide the setting in PubSubClient.h - it gets compiled after So This setting MUST BE 
                                   //        updated manually in PubSubClient.h - Otherwise longer messages will not be received.  When this happens
@@ -20,7 +21,7 @@
 #define ARDUINOJSON_USE_LONG_LONG 1
 
 //#undef QNODE_DEBUG_VERBOSE
-#define QNODE_DEBUG_VERBOSE
+//#define QNODE_DEBUG_VERBOSE
 
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
@@ -40,8 +41,8 @@ class QNodeObject {
      virtual void publish( const String &topic, const String &msg, bool retain );
      virtual void publish( const String &topic, const JsonObject &msg, bool retain );
 
-     virtual void logMessage( uint8_t level, String &msg );
-     virtual void logMessage( String &msg );
+     virtual void logMessage( uint8_t level, const String &msg );
+     virtual void logMessage( const String &msg );
      virtual void logMessage( const char *msg );
      virtual void logMessage( uint8_t level, const char *msg );
    
@@ -77,8 +78,8 @@ class QNodeActor : virtual public QNodeObject {
       setInactive(false);
       setUnthrottled(false);
       cycleCount = 0;
-      cycleRollover = 0;
-      if (!inactive) { updateTimer.start(); } 
+      cycleRollover = 0;      
+      //if (!inactive) { updateTimer.start(); } 
     }
     void setName(const String &newName) { name = newName; }
     String getName() { return name; }
@@ -138,6 +139,7 @@ class QNodeItem : public QNodeActor, public QNodeObserver {
     
     virtual void onItemStateChange(String const &stateName, String const &stateValue) {}
     virtual void onItemStateChange( const JsonObject &stateMessage ) {}
+    virtual void onItemStateUpdate() {};
     virtual void onItemConfig(const JsonObject &message) {}
     virtual void onItemCommand(const JsonObject &message) {}
     virtual void logItemEvent(const String &eventName ) {}
@@ -147,12 +149,27 @@ class QNodeItem : public QNodeActor, public QNodeObserver {
     virtual void onItemAttach( QNodeController *owner ) {}
     virtual void onItemDetach( QNodeController *owner ) {}
 
+    virtual void writeItemConfig(const JsonObject &msg);
+    virtual boolean readItemConfig();
     virtual boolean isConfigMessage( const String &topic, const JsonObject &message ) = 0;    
-    virtual void onConfig( const String &topic, const JsonObject &message ) override { if (isConfigMessage( topic, message )) { this->onItemConfig( message ); } }
+    virtual void onConfig( const String &topic, const JsonObject &message ) override { 
+      if (this->isConfigMessage( topic, message )) 
+      {  
+         if (!topic.equals("internal")) 
+            {
+              this->writeItemConfig(message); 
+            }
+            this->onItemConfig( message ); 
+      }
+    }
     virtual void onConfig( const String &topic, const String &message) {};  
     
     virtual boolean isCommandMessage( const String &topic ) = 0;
-    virtual void onMessage( const String &topic, const JsonObject &message ) override {if (isCommandMessage(topic)) { onItemCommand(message); } }
+    virtual void onMessage( const String &topic, const JsonObject &message ) override {
+      if (isCommandMessage(topic)) {        
+        onItemCommand(message); 
+      } 
+    }
     virtual void onMessage( const String &topic, const String &message ) override {}
 
     virtual void onLongOpEnd( unsigned long timeTaken ) { } 
@@ -160,7 +177,7 @@ class QNodeItem : public QNodeActor, public QNodeObserver {
     void markLongOpStart() { longOpStartMillis = GET_TIME_MILLIS_ABS; }
     void markLongOpEnd() {
       if (longOpStartMillis) {
-        onLongOpEnd( GET_TIME_MILLIS_ABS - longOpStartMillis );
+        this->onLongOpEnd( GET_TIME_MILLIS_ABS - longOpStartMillis );
         longOpStartMillis = 0;
       }
     }
@@ -208,13 +225,19 @@ public:
   QNodeController( const char *init_ssid, const char *password, const char *mqtt_server, const char *mqtt_user, const char *mqtt_password, const String &rootHostTopic ): QNodeController( init_ssid, password, mqtt_server, DEFAULT_MQTT_PORT, mqtt_user, mqtt_password, rootHostTopic ) {}
   QNodeController( const String &init_ssid, const String &password, const String &mqtt_server, const String &mqtt_user, const String &mqtt_password, const String &rootHostTopic ):QNodeController( init_ssid.c_str(), password.c_str(), mqtt_server.c_str(), DEFAULT_MQTT_PORT, mqtt_user.c_str(), mqtt_password.c_str(), rootHostTopic ) {}
   
-  void setSketchVersion( const String &initVer ) { sketchVersion = initVer; }
+  void setSketchVersion( const String &initVer ) { 
+    sketchVersion = initVer; 
+  }
+
   String getSketchVersion() { return sketchVersion; }
 
   void setDescription( const String &newDesc ) {
     description = newDesc;
   }
   String getDescription() { return description; }
+
+  void readHostName();
+  void writeHostName(String newHost);
 
   void setLogLevel( uint8_t newLevel ) { logLevel = (newLevel > LOGLEVEL_DEBUG ? LOGLEVEL_DEBUG : newLevel);  }
   uint8_t getLogLevel() { return logLevel; }
@@ -235,20 +258,26 @@ public:
   void setRootTopic( String &newRootTopic );
 
   time_t getTime() { if (!timeSet) { return 0; } else { return now(); } }
+  String getFormattedTimestamp();
 
   virtual void onMQTTSend( String &topic, String &message ) {}
   void mqtt_publish( const String &topic, const String &msg, bool retain );
   void mqtt_publish( const String &topic, const JsonObject &msg, bool retain );
 
-  void logMessage( uint8_t level, String &msg ) override;
-  void logMessage( String &msg ) override { logMessage( LOGLEVEL_INFO, msg );}
+  void logMessage( uint8_t level, const String &msg ) override;
+  void logMessage( const String &msg ) override { logMessage( LOGLEVEL_INFO, msg );}
   void logMessage( const char *msg ) override { String message = String(msg); logMessage( message ); }
   void logMessage( uint8_t level, const char *msg ) override { String message = String(msg); logMessage( level, message ); }
 
   void attachItem( QNodeItem *item );
   void detachItem( QNodeItem *item );
 
-  virtual boolean isConfigMessage( const String &topic, const JsonObject &message ) override { return topic == getHostConfigTopic(); }    
+  void writeConfig( const JsonObject &msg);
+  bool readConfig();
+
+  virtual boolean isConfigMessage( const String &topic, const JsonObject &message ) override { 
+    return ((topic == getHostConfigTopic()) || topic.equals("internal")); 
+  }    
   virtual void onConfig( const String &topic, const JsonObject &msg ) override;
   virtual boolean isCommandMessage( const String &topic ) override { return false; } 
 
@@ -269,8 +298,10 @@ public:
   virtual void update() override;
   void loop();
   void connect();
+  bool mqttConnected();
   void dispatchMessage( String topic, String message );
   void publishState();
+  boolean isFSMounted() { return fsMounted; }
 
 protected:
   boolean topicInUse( const String &topic );
@@ -297,13 +328,12 @@ protected:
   bool wifiConnected();
   void endWifi();
   bool startMqtt();
-  bool mqttConnected();
   void endMqtt();
   bool startNtp();
   bool ntpConnected();
   void endNtp();
   
-  PubSubClient *mqttClient = nullptr;
+  PubSubClient* mqttClient = nullptr;
   NTPClient* ntpClient = nullptr;
 
   unsigned long nodeStarted = 0;
@@ -339,6 +369,9 @@ private:
   WiFiUDP *ntpUdp = nullptr;
   bool ntpStarted = false;
   StepTimer ntpTimer = StepTimer( NTP_TIME_REFRESH_INTERVAL, false );
+  bool fsMounted = false;
+  bool initPhase = true;
+  StepTimer initTimer = StepTimer( 3000, false );
   WiFiClient *wifiClient = nullptr;
   String configNewHostName = "";
   QNodeItem *findVectorItem(std::vector<QNodeItem *> list, QNodeItem &newItem ); 

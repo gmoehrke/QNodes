@@ -3,12 +3,13 @@
 #include "TimeLib.h"
 #include <Limits.h>
 #include <string.h>
+#include <LittleFS.h>
 
 void QNodeObject::publish( const String &topic, const String &msg, bool retain ) { if (owner) { owner->mqtt_publish( topic, msg, retain); } }
 void QNodeObject::publish( const String &topic, const JsonObject &msg, bool retain ) { if (owner) { owner->mqtt_publish( topic, msg, retain); } }
 
-void QNodeObject::logMessage( uint8_t level, String &msg ) { if (owner) { owner->logMessage( level, msg ); } }
-void QNodeObject::logMessage( String &msg ) { if (owner) {owner->logMessage(msg); } }
+void QNodeObject::logMessage( uint8_t level, const String &msg ) { if (owner) { owner->logMessage( level, msg ); } }
+void QNodeObject::logMessage( const String &msg ) { if (owner) {owner->logMessage(msg); } }
 void QNodeObject::logMessage( const char *msg ) { if (owner) { owner->logMessage( msg ); } }
 void QNodeObject::logMessage( uint8_t level, const char *msg ) { if (owner) {owner->logMessage( level, msg ); } }
 
@@ -31,24 +32,26 @@ void QNodeObserver::removeTopic(const String &topic ) {
 }
 
 void QNodeActor::setInactive( boolean newValue ) { 
+  //logMessage("Set Inactive starting");
   if (newValue != inactive) {
     inactive = newValue;
     if ( !inactive && !unThrottled ) { updateTimer.start(); }
     else { updateTimer.stop(); }
   }
+  //logMessage("Set Inactive ending");
 }
 
 void QNodeActor::setUnthrottled( boolean newValue ) {
   if (newValue != unThrottled) {
     unThrottled = newValue;
-    if (updateTimer.isStarted() && !inactive) { updateTimer.start(); }
+    if (!updateTimer.isStarted() && !inactive) { updateTimer.start(); }
   }
 }    
 
 void QNodeActor::actorUpdate() {
   if (!inactive) { 
     if ((updateTimer.isUp() || unThrottled)) {
-      update();
+      this->update();
       if (cycleCount == ULONG_MAX) { 
         cycleRollover++; 
         cycleCount = 0;
@@ -82,25 +85,84 @@ void QNodeItem::actorUpdate() {
 
 void QNodeItem::start() { 
   if (!started) {
-    setInactive( false );
-    started = true; 
-    logItemEvent(getName() + " Started update handler.");
+    this->setInactive( false );
+    started = true;
+    this->logItemEvent(getName() + F(" Started update handler."));
   }
 } 
    
 void QNodeItem::stop() { 
   if (started) { 
-    logItemEvent(getName() + " Stopped update handler");
+    logItemEvent(getName() + F(" Stopped update handler"));
     started = false; 
     setInactive( true );
   }
 }
 
+bool QNodeItem::readItemConfig( ) {
+    DynamicJsonDocument doc(JSON_BUFFER_SIZE);
+    JsonObject root = doc.to<JsonObject>(); 
+    String filename = "/" + this->getItemID();
+    bool result = false;
+    String st = F("Attempting to read item config from: ");
+    logMessage( QNodeController::LOGLEVEL_DEBUG, st + filename);
+    if(getOwner()->isFSMounted()) {
+      File file = LittleFS.open(filename, "r");
+      if (file) {
+         auto error = deserializeJson( doc, file );
+         if (error) {
+           #ifdef QNODE_DEBUG_VERBOSE
+           logMessage(QNodeController::LOGLEVEL_DEBUG, "Error reading/deserializing item config from file:  " + filename);
+           #endif
+         }
+         else {
+         #ifdef QNODE_DEBUG_VERBOSE
+         logMessage(QNodeController::LOGLEVEL_DEBUG, "Config read from " + filename );
+         #endif
+         this->onConfig(this->getItemID(), root);
+         result = true;
+         }     
+      }
+      else {
+        #ifdef QNODE_DEBUG_VERBOSE
+        logMessage(QNodeController::LOGLEVEL_DEBUG, "File:  "+filename+" does not exist.  Will be created with default or MQTT configured item info.");
+        #endif
+      }
+    // LittleFS.end();      
+  }
+  else {
+    logMessage(QNodeController::LOGLEVEL_DEBUG,F("Unable to mount LittleFS FileSystem to read config."));
+  }
+  return(result);  // return(true);
+}
+
+void QNodeItem::writeItemConfig(const JsonObject &msg) {
+    
+  String filename = "/" + this->getItemID();
+  if(getOwner()->isFSMounted()) {
+      #ifdef QNODE_DEBUG_VERBOSE
+      logMessage("Writing item config to:  " + filename );
+      #endif
+      File file = LittleFS.open(filename, "w");
+      if (file) {
+         serializeJson(msg, file);
+         #ifdef QNODE_DEBUG_VERBOSE
+         logMessage("Item config written to:  " + filename );
+         #endif
+      }
+    // LittleFS.end();  
+  }
+  else {
+    logMessage(QNodeController::LOGLEVEL_INFO,F("Unable to mount/format FileSystem to write config."));
+  }
+
+}
 
 void QNodeItem::publishItem( const String topic, const String value ) { publish( topic, value, true ); }
 void QNodeItem::publishItem( const String topic, JsonObject &content ) { publish( topic, content, true ); }
 void QNodeItem::publishItem( const String topic, const String &attrName, const String &attrValue, PublishFormat format ) {
   switch (format) {
+    case PUB_NONE : { break; }
     case PUB_TEXT : { this->publish( topic + QNodeController::slash + attrName, attrValue, true ); break; }
     case PUB_JSON : { String js = "{\"";
                       js += attrName;
@@ -126,14 +188,21 @@ QNodeController::QNodeController( const char *init_ssid, const char *password, c
     mqttHostRoot = rootHostTopic;
     ntpStarted = false;
     timeSet = false;
-    logMessage( "Initializing...");
+    mqttClient = nullptr;
+    wifiClient = nullptr;
+    #ifdef QNODE_DEBUG_VERBOSE
+    logMessage( "QNodeController Initializing...");
+    #endif
     attachItem(this);
-    connect();    
+    setUnthrottled( true );
+    fsMounted = LittleFS.begin();
+    this->start();        
+    
+    /*connect();    
     String topic=getHostConfigTopic();
     addTopic( topic ); 
-    setUnthrottled( true );
-    start();    
     pulseTimer.start();
+    */
  }
 
 String QNodeController::getHostRootTopic() {
@@ -169,23 +238,68 @@ String QNodeController::getHostStateTopic() {
   return result;
 }
 
+void QNodeController::readHostName() {
+  String newHost;
+  if(fsMounted) {
+      File file = LittleFS.open("/hostname", "r");
+      if (file) {
+         newHost = file.readString();
+         WiFi.hostname(newHost);
+         this->setItemID(newHost);
+         currHostName = String(WiFi.hostname());
+         file.close();
+         #ifdef QNODE_DEBUG_VERBOSE
+         logMessage(LOGLEVEL_DEBUG, "Host name read from /hostname:  " + newHost);
+         #endif
+      }
+      else {
+        #ifdef QNODE_DEBUG_VERBOSE
+        logMessage(LOGLEVEL_DEBUG, "File:  /hostname does not exist.  Will be created with default or MQTT configured host info.");
+        #endif
+      }
+    //LittleFS.end();  
+  }
+  else {
+    logMessage(LOGLEVEL_INFO, F("Unable to mount LittleFS FileSystem to read host name."));
+  }
+}
+
+void QNodeController::writeHostName(String newHost) {
+  //SPIFFSConfig cfg;
+  //cfg.setAutoFormat(true);
+  //SPIFFS.setConfig(cfg);
+  if(fsMounted) {
+      File file = LittleFS.open("/hostname", "w");
+      if (file) {
+         file.write(newHost.c_str());    
+         String st = F("Host name written to /hostname:  ");     
+         logMessage(LOGLEVEL_DEBUG, st + newHost);
+      }
+    //LittleFS.end();  
+  }
+  else {
+    logMessage(LOGLEVEL_INFO, F("Unable to mount/format FileSystem to write host name."));
+  }
+}
+
 
 bool QNodeController::startWifi() {
   // Connect to WiFi network
-  logMessage("Establishing WiFi connection to "+ssid+" ("+netPassword+")" );
+  logMessage(LOGLEVEL_INFO, "Establishing WiFi connection to "+ssid+" ("+netPassword+")" );
   WiFi.mode(WIFI_STA);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
+  readHostName();
   WiFi.begin(ssid.c_str(), netPassword.c_str());
   while (!wifiConnected()) {
     delay(500);
-    logMessage("...waiting for connect...");
+    logMessage(F("...waiting for connect..."));
   }
   currHostName = String(WiFi.hostname());
   currIPAddr = WiFi.localIP().toString();
   currMACAddr = WiFi.macAddress();
-  logMessage("WiFi connected");
-  logMessage("IP address: " + WiFi.localIP().toString());
-  logMessage("Host name: "+String(currHostName) );  
+  logMessage(LOGLEVEL_INFO, "WiFi connected");
+  logMessage(LOGLEVEL_INFO, "IP address: " + WiFi.localIP().toString());
+  logMessage(LOGLEVEL_INFO, "Host name: "+String(currHostName) );  
   return(WiFi.status() == WL_CONNECTED);
 }
 
@@ -194,14 +308,16 @@ bool QNodeController::wifiConnected() {
 }
 
 void QNodeController::endWifi() {
-  logMessage("Wifi disconnecting...");
+  logMessage(LOGLEVEL_INFO, "Wifi disconnecting...");
   endNtp();
   endMqtt();
   WiFi.disconnect();
 }
 
 void QNodeController::subUnsubAllTopics( bool sub ) { 
-    logMessage("Refreshing subscribed topics." );
+    #ifdef QNODE_DEBUG_VERBOSE
+    logMessage( LOGLEVEL_DEBUG, "Refreshing subscribed topics." );
+    #endif
     for (auto i : items ) {
          for( auto j : i->getTopicList() ) {
             if (sub) {
@@ -239,7 +355,7 @@ bool QNodeController::startMqtt() {
       st = F("MQTT connection established.");
       logMessage(LOGLEVEL_INFO, st);
       // Subscribe to any topics we're listening to...
-      logMessage( "MQTT Connected - Max Packet Size is " + String(MQTT_MAX_PACKET_SIZE));
+      logMessage(LOGLEVEL_DEBUG, "MQTT Connected - Max Packet Size is " + String(MQTT_MAX_PACKET_SIZE));
       subUnsubAllTopics(true); 
     }    
     else {    
@@ -247,23 +363,25 @@ bool QNodeController::startMqtt() {
       logMessage(LOGLEVEL_DEBUG, "MQTT Error on connect("+currHostName+", "+mqttServerName+", "+mqttUserName+", "+mqttPassword+") ");
       #endif
       st = F("MQTT Connection unsuccessful, error code: ");
-      logMessage(st+String(mqttClient->state()));
+      logMessage(LOGLEVEL_INFO, st+String(mqttClient->state()));
       result = false;
     }
     return result;
 }
 
 bool QNodeController::mqttConnected() {
-  bool result = true;
+  bool result = false;
   if (mqttClient) {
     result = (mqttClient->state()==MQTT_CONNECTED);
   }
-  else { result = false; }
+  else { 
+    result = false; 
+  }
   return result;
 }
 
 void QNodeController::endMqtt() {
-    logMessage("Stopping MQTT service.");
+    logMessage(LOGLEVEL_INFO, F("Stopping MQTT service."));
     if (mqttClient) { 
       mqttClient->disconnect();
     }  
@@ -273,14 +391,14 @@ bool QNodeController::startNtp() {
   bool result = true;  
   if (wifiConnected() && !ntpStarted) {
     String st = F("Starting NTP time update service.");
-    logMessage(st);
+    logMessage(LOGLEVEL_INFO, st);
     if (ntpClient==nullptr) {
       ntpUdp = new WiFiUDP();
       ntpClient = new NTPClient(*ntpUdp, TIME_ZONE_OFFSET);
     }  
     //ntpClient->begin();
     ntpStarted = true;
-    logMessage("NTP Time started.");
+    logMessage(LOGLEVEL_DEBUG, F("NTP Time started."));
     ntpTimer.start();
     updateTime();
     bootTime = ntpClient->getEpochTime()-(GET_TIME_MILLIS_ABS/1000);
@@ -295,11 +413,11 @@ bool QNodeController::ntpConnected() {
 void QNodeController::endNtp() {
   if (ntpConnected()) {
     String st = F("Stopping NTP time update service.");
-    logMessage(st);    
+    logMessage(LOGLEVEL_INFO, st);    
     ntpStarted = false;
     ntpTimer.stop();
     st = F("NTP time update service stopped.");
-    logMessage(st);    
+    logMessage(LOGLEVEL_DEBUG, st);    
   }
 }
 
@@ -314,17 +432,24 @@ void QNodeController::connect() {
     }
 }
 
-void QNodeController::logMessage( uint8_t level, String &msg ) {
+String QNodeController::getFormattedTimestamp() {
+  String result;
+  if (timeSet) 
+  {
+    char dateStr[11];
+    sprintf( dateStr, "%02d/%02d/%d", month(), day(), year() );
+    result = "["+String(dateStr)+" "+ntpClient->getFormattedTime()+"] ";
+  }
+  else {
+    result = "[ boot "+String(GET_TIME_MILLIS_ABS)+" ms] ";
+  }
+  return(result);    
+}
+
+void QNodeController::logMessage( uint8_t level, const String &msg ) {
     String msgStr;
     if (logLevel >= level) {
-      if (timeSet) {
-          char dateStr[11];
-          sprintf( dateStr, "%02d/%02d/%d", month(), day(), year() );
-          msgStr = "["+String(dateStr)+" "+ntpClient->getFormattedTime()+"] ";
-      }
-      else {
-        msgStr = "[ boot "+String(GET_TIME_MILLIS_ABS)+" ms] ";
-      }
+      msgStr = this->getFormattedTimestamp();      
       msgStr.concat( msg );
       if ( (strcmp(logTopic.c_str(), LOG_TO_SERIAL)==0)  || (!mqttConnected()) )
         Serial.println( msgStr );
@@ -338,9 +463,12 @@ void QNodeController::logMessage( uint8_t level, String &msg ) {
 void QNodeController::attachItem( QNodeItem *item ) { 
   item->setOwner(this);
   items.push_back(item);   
-  logMessage( LOGLEVEL_DEBUG, "Attaching item: " + item->getItemTag());
+  String st = F("Attaching item: ");
+  logMessage( LOGLEVEL_DEBUG, st + item->getItemTag());
   for (auto t : item->getTopicList() ) { 
-      mqttSubscribeTopic( t );
+      if (mqttConnected()) {
+        mqttSubscribeTopic( t );
+      }
    }
   item->onItemAttach( this ); 
 }
@@ -371,10 +499,12 @@ void QNodeController::mqttSubscribeTopic(const String &topic ) {
     if (std::find( subdTopics.begin(), subdTopics.end(), topic) == subdTopics.end()) {
       if (mqttClient->subscribe( topic.c_str() )) {
         subdTopics.push_back( topic );
-        logMessage(String(F("MQTT:  Subscribed to topic: ")) + topic );
+        String st = F("MQTT:  Subscribed to topic: ");
+        logMessage(LOGLEVEL_DEBUG, st + topic );
       }
       else {
-        logMessage("MQTT:  Error subscribing to topic: " + topic );
+        String st = F("MQTT:  Error subscribing to topic: ");
+        logMessage(LOGLEVEL_INFO, st + topic );
       }
     }
   }
@@ -389,7 +519,8 @@ void QNodeController::mqttUnsubscribeTopic(const String &topic, boolean force ) 
       if (!topicInUse(topic) || force) {
         mqttClient->unsubscribe( topic.c_str() );
         subdTopics.erase(std::remove(subdTopics.begin(), subdTopics.end(), topic), subdTopics.end()); 
-        logMessage(QNodeController::LOGLEVEL_INFO,String(F("MQTT:  Unsubscribed to topic: ")) + topic );      
+        String st = F("MQTT:  Unsubscribed to topic: ");
+        logMessage(QNodeController::LOGLEVEL_INFO,st + topic );      
       }
     }
   }
@@ -399,37 +530,38 @@ void QNodeController::mqttUnsubscribeTopic(const String &topic, boolean force ) 
 }
 
 void QNodeController::mqtt_publish(const String &topic, const String &msg, bool retain ) {
-  if (mqttConnected()) {
+  if (this->mqttConnected()) {
     String t = topic;
     String m = msg;
-    onMQTTSend( t, m );
-
+    this->onMQTTSend( t, m );
     mqttClient->beginPublish(t.c_str(), msg.length(), retain );
     for (uint16_t i=0; i<msg.length(); i++) {
       mqttClient->write(msg.c_str()[i]);
     }
     mqttClient->endPublish();
     pubMsg++;
+  } 
+  #ifdef QNODE_DEBUG_VERBOSE
+  else {    
+    logMessage(QNodeController::LOGLEVEL_INFO, "MQTT connection unavailable.  Unable to publish to: "+topic );//+" Message: "+msg );
   }
-  else {
-    logMessage(QNodeController::LOGLEVEL_INFO, String(F("MQTT connection unavailable.  Unable to publish to: "))+topic+" Message: "+msg );
-  }
+  #endif
 }
 
 void QNodeController::mqtt_publish( const String &topic, const JsonObject &msg, bool retain ) {
-  String jsonStr = "";
+  String jsonStr;
   serializeJson( msg, jsonStr ); 
   
   #ifdef QNODE_DEBUG_VERBOSE
   logMessage( LOGLEVEL_DEBUG, "JSON serialized:  "+jsonStr );
   #endif 
   
-  if (mqttConnected()) {
-    publish( topic, jsonStr, retain );
-  }
-  else {
-    logMessage( String(F("MQTT connection unavailable.  Unable to publish JSON to: "))+topic+" Message: "+jsonStr );
-  }
+  //if (this->mqttConnected()) {
+    this->mqtt_publish( topic, jsonStr, retain );
+  //}
+  //else {
+  //  logMessage( String(F("MQTT connection unavailable.  Unable to publish JSON to: "))+topic+" Message: "+jsonStr );
+  //}
 }
 
 void QNodeController::dispatchMessage( String topic, String message ) {
@@ -454,7 +586,8 @@ void QNodeController::dispatchMessage( String topic, String message ) {
         {
           if (error) { 
             (i)->onConfig(topic, message) ; }
-          else { 
+          else if (topic.endsWith(i->getItemID()) || (topic.endsWith("config") && i==this)) { 
+            logMessage( LOGLEVEL_DEBUG, "Sending config message from topic "+topic+" to item " + (i)->getItemID() + ": " + message );
             (i)->onConfig(topic, root ); 
           }
         }       
@@ -497,6 +630,50 @@ void QNodeController::mqttCallback( char* topic, byte* payload, unsigned int len
     }
 }
 
+void QNodeController::writeConfig( const JsonObject &msg) {
+  // serializeJson( msg, file );
+  if(fsMounted) {
+      File file = LittleFS.open("/config", "w");
+      if (file) {
+         serializeJson(msg, file);
+         logMessage(F("Configuration items written to /config"));
+      }
+    //LittleFS.end();  
+  }
+  else {
+    logMessage(F("Unable to mount/format FileSystem to write config"));
+  }
+}
+
+bool QNodeController::readConfig( ) {
+    DynamicJsonDocument doc(JSON_BUFFER_SIZE);
+    JsonObject root = doc.to<JsonObject>(); 
+    bool result = false;
+    if(fsMounted) {
+      File file = LittleFS.open("/config", "r");
+      if (file) {
+         auto error = deserializeJson( doc, file );
+         if (error) {
+           logMessage(F("Error reading/deserializing /config"));
+         }
+         else {
+         logMessage(F("Config read from /config"));
+         this->onConfig(F("internal"), root);
+         result = true;
+         }     
+      }
+      else {
+        logMessage(F("File /config does not exist.  Will be created with default or MQTT configured host info."));
+      }
+    // LittleFS.end();      
+  }
+  else {
+    logMessage(F("Unable to mount LittleFS FileSystem to read config."));
+  }
+  return(result); // return( true );
+}
+
+
 void QNodeController::onConfig( const String &topic, const JsonObject &msg ) {
   if (msg.containsKey("hostname")) {
     logMessage( LOGLEVEL_INFO, "Request new host name:  "+msg["hostname"].as<String>()+" - Wifi willl reset..." );
@@ -508,24 +685,31 @@ void QNodeController::onConfig( const String &topic, const JsonObject &msg ) {
   }
 
   if (msg.containsKey("items")) {
-    logMessage("Creating Items:  ");
+    
+    if (!topic.equals("internal")) {
+      writeConfig(msg);
+    }
+
+    logMessage(LOGLEVEL_DEBUG, F("Creating Items:  "));
     for (auto ctx : msg["items"].as<JsonArray>()) {
+      logMessage(LOGLEVEL_DEBUG, "  Checing item : " + ctx.as<String>());
       if (ctx.as<JsonObject>().containsKey("tag")) {      
         boolean found = false;
         for (auto i : items) {
           if (i->getItemTag()==ctx["tag"]) { 
-            if (!(ctx["id"])) { found = true; break; }
-            else if (ctx["id"]==getItemID()) { found = true; break; }
+            if (!(ctx["id"])) { found = true; logMessage("    found."); break; }
+            else if (ctx["id"]==getItemID()) { found = true; logMessage("    found."); break; }
           }
         }
         if (!found) {
-          logMessage("  Item: " + ctx["tag"].as<String>() );
+          logMessage(LOGLEVEL_DEBUG, "  Item: " + ctx["tag"].as<String>() + " not found - building..." );
           QNodeItemController *qni = QNodeItemController::getFactory()->create(ctx["tag"].as<String>());
           if (ctx.as<JsonObject>().containsKey("id")) {
+             // qni->readItemConfig();
              qni->setConfigSubtopic(ctx["id"].as<String>());
           }
           pendingItems.push_back( qni );         
-          logMessage("  Item: " + ctx["tag"].as<String>() + " created." );
+          logMessage(LOGLEVEL_DEBUG, "  Item: " + ctx["tag"].as<String>() + " built." );
         }
     }
   }
@@ -534,8 +718,9 @@ void QNodeController::onConfig( const String &topic, const JsonObject &msg ) {
 
 void QNodeController::onMessage( const String &topic, const String &message )  {
       recdTextMsg++;
-      #ifdef QNODE_DEBUG_VERBOSE
-      logMessage(LOGLEVEL_DEBUG, "Text based message received ["+topic+"]: "+ message);        
+      #ifdef QNODE_DEBUG_VERBOSE    
+      String st = "Text based message received ["+topic+"]: "+ message;  
+      logMessage(LOGLEVEL_DEBUG, st);        
       #endif
 }
 
@@ -556,7 +741,8 @@ int QNodeController::dstOffset (unsigned long unixTime)
   int endDSTDay = (7 - (1 + year(t) * 5 / 4) % 7);
   int endDSTMonth=11;
   #ifdef QNODE_DEBUG_VERBOSE
-  logMessage(LOGLEVEL_DEBUG,  "NTP Client - Calculating DST Start Date: " + String( beginDSTMonth ) + "/" + String( beginDSTDay ) ); 
+  String st = "NTP Client - Calculating DST Start Date: " + String( beginDSTMonth ) + "/" + String( beginDSTDay );
+  logMessage(LOGLEVEL_DEBUG, st ); 
   #endif 
   if (((month(t) > beginDSTMonth) && (month(t) < endDSTMonth))
     || ((month(t) == beginDSTMonth) && (day(t) > beginDSTDay))
@@ -589,7 +775,7 @@ void QNodeController::updateTime() {
        nodeStarted = ntpClient->getEpochTime()-(GET_TIME_MILLIS_ABS/1000);
      }
      timeSet = true;
-     logMessage( LOGLEVEL_INFO, "NTP Time updated.");
+     logMessage( LOGLEVEL_INFO, F("NTP Time updated."));
      ntpTimer.step();     
   }
 }
@@ -643,6 +829,11 @@ void QNodeController::sendStateJson() {
   publishItem( baseTopic, "node_id", currHostName, PUB_TEXT );
   publishItem( baseTopic, "description", getDescription(), PUB_TEXT );
   publishItem( baseTopic, "chip_id", currChipID, PUB_TEXT );
+  publishItem( baseTopic, "esp8266_core_version", ESP.getCoreVersion(), PUB_TEXT );
+  publishItem( baseTopic, "esp8266_sdk_version", ESP.getSdkVersion(), PUB_TEXT );
+  #ifdef REPORT_VCC
+  publishItem( baseTopic, "esp8266_input_vcc", String(ESP.getVcc()), PUB_TEXT );
+  #endif
   publishItem( baseTopic, "ip_address", currIPAddr, PUB_TEXT );
   publishItem( baseTopic, "mac_address", currMACAddr, PUB_TEXT );
   publishItem( baseTopic, "free_memory", String(ESP.getFreeHeap()), PUB_TEXT );
@@ -674,34 +865,73 @@ void QNodeController::publishState() {
 }
 
 void QNodeController::update() {
-   if (!wifiConnected()) {
-     endMqtt();
-     logMessage("WiFi connection lost - reconnecting.");
-     wifiReconnect++;
-     connect();   
-   }
-   if (wifiConnected()) {
-    if (!mqttConnected()) {
-      logMessage(LOGLEVEL_INFO, "MQTT connection lost - attempting to reconnect.");     
-      logMessage(LOGLEVEL_INFO, "MQTT Status -> " + String(mqttClient->state()) );
-      if (mqttClient->state()==MQTT_CONNECTION_TIMEOUT) { lastDisconnectReason = "MQTT Connection Timeout"; }
-      else if (mqttClient->state()==MQTT_CONNECTION_LOST) { lastDisconnectReason = "MQTT Connection Lost"; }
-      else if (mqttClient->state()==MQTT_CONNECT_FAILED) { lastDisconnectReason = "MQTT Connection Failed"; }
-      else { lastDisconnectReason = String(mqttClient->state()); }
-      mqttReconnect += 1;
-      startMqtt();
-    }
-    else {
-     mqttClient->loop();     
-     if (ntpConnected()) {
-       updateTime();
+  
+   if (initPhase) {
+     if (!initTimer.isStarted()) {
+       String st = F("****************************************************");
+       logMessage(LOGLEVEL_INFO, st);
+       logMessage(LOGLEVEL_INFO, getSketchVersion());
+       logMessage(LOGLEVEL_INFO, st);
+       readHostName();
+       if (readConfig()) {         
+         initTimer.start();         
+       }
+       else {
+         initPhase = false;
+         logMessage(QNodeController::LOGLEVEL_DEBUG, F("No internal configuration found - bypass init phase."));
+       }
      }
+     else if (initTimer.isUp()) {
+       initPhase = false;
+       initTimer.stop();       
+     }
+     if (!initPhase) // Initialization phase has completed (timed out) or no internal config found so not needed
+     {
+       logMessage(QNodeController::LOGLEVEL_DEBUG, F("Done with initialization phase:"));
+       for (auto i : items) {
+          logMessage(QNodeController::LOGLEVEL_DEBUG, "Item: " + i->getItemID() + " cycles: " + String((unsigned long)i->getNumCycles()));
+       }
+       connect();    
+       String topic=getHostConfigTopic();
+       addTopic( topic ); 
+       this->subUnsubAllTopics(true);
+       pulseTimer.start();       
+       for (auto i : items) {
+        i->onItemStateUpdate();
+      }
+     }
+   }
+   else { 
+      if (!wifiConnected()) {
+        endMqtt();
+        logMessage(LOGLEVEL_INFO,F("WiFi connection lost - reconnecting."));
+        wifiReconnect++;
+        connect();   
+      }
+      if (wifiConnected()) {
+        if (!mqttConnected()) {
+          logMessage(LOGLEVEL_INFO, F("MQTT connection lost - attempting to reconnect."));     
+          String st = "MQTT Status -> " + String(mqttClient->state());
+          logMessage(LOGLEVEL_INFO, st);
+          if (mqttClient->state()==MQTT_CONNECTION_TIMEOUT) { lastDisconnectReason = F("MQTT Connection Timeout"); }
+          else if (mqttClient->state()==MQTT_CONNECTION_LOST) { lastDisconnectReason = F("MQTT Connection Lost"); }
+          else if (mqttClient->state()==MQTT_CONNECT_FAILED) { lastDisconnectReason = F("MQTT Connection Failed"); }
+          else { lastDisconnectReason = String(mqttClient->state()); }
+          mqttReconnect += 1;
+          startMqtt();
+        }
+        else {
+          mqttClient->loop();     
+          if (ntpConnected()) {
+          updateTime();
+          }
+        }
+        if (pulseTimer.isUp()) {
+          publishState();
+          pulseTimer.step();
+        }
+      }
     }
-    if (pulseTimer.isUp()) {
-      publishState();
-      pulseTimer.step();
-    }
-  }
 }
 
 QNodeItem *QNodeController::findVectorItem(std::vector<QNodeItem *> list, QNodeItem &newItem ) {
@@ -717,12 +947,14 @@ void QNodeController::loop() {
        i->actorUpdate();     
     } 
     if (pendingItems.size() > 0) {
-      logMessage(LOGLEVEL_DEBUG, "Configuring controller:  attaching pending Items:");
+      logMessage(LOGLEVEL_DEBUG, F("Configuring controller:  attaching pending Items:"));
       QNodeItem *pendingItem = nullptr;
       for (auto existing : items) {        
         pendingItem = findVectorItem( pendingItems, *existing );
         if (pendingItem) {
+          #ifdef QNODE_DEBUG_VERBOSE
           logMessage( LOGLEVEL_DEBUG, "  Ignoring Item: " + pendingItem->getName() + " [" + pendingItem->getItemID() + "] duplicates Item: " + existing->getName() + " [" + existing->getItemID() + "]" );
+          #endif
           pendingItems.erase( std::remove(pendingItems.begin(), pendingItems.end(), pendingItem), pendingItems.end() );
           delete pendingItem;
           pendingItem = nullptr;
@@ -732,9 +964,13 @@ void QNodeController::loop() {
         #ifdef QNODE_DEBUG_VERBOSE
         logMessage(LOGLEVEL_DEBUG, "  Adding Item:  " + c->getName() + " [" + c->getItemID() + "]" );          
         #endif         
-        attachItem( c );
+        attachItem( c );        
       }
-
+      if (initTimer.isStarted()) {
+          for (auto i : items ) {            
+            i->readItemConfig(); 
+          }
+      }
       #ifdef QNODE_DEBUG_VERBOSE
       for (auto i : items ) {
          for( auto j : i->getTopicList() ) {
@@ -742,7 +978,6 @@ void QNodeController::loop() {
           }
        }
       #endif
-
       pendingItems.clear();
     }
      
@@ -750,9 +985,10 @@ void QNodeController::loop() {
       subUnsubAllTopics(false);
       String topic=getHostConfigTopic();
       removeTopic( topic ) ;
-      WiFi.hostname( configNewHostName );
-      WiFi.disconnect();
       WiFi.hostname(configNewHostName);
+      writeHostName(configNewHostName);
+      WiFi.disconnect();
+      WiFi.hostname(configNewHostName);      
       connect();
       setItemID(configNewHostName);
       //subUnsubAllTopics(true);

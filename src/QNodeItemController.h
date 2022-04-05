@@ -59,13 +59,15 @@ class QNodeItemController : public QNodeItem {
       cmdTopics.erase( cmdTopics.begin(), cmdTopics.end());
     }
 
-    String getDescription() { if (description.length()==0) { return( getItemID() + " (" + getName() + ")" ); } else { return description; }}
+    String getDescription() { if (description.length()==0) { return( this->getItemID() + " (" + this->getName() + ")" ); } else { return description; }}
     String setDescription( String& desc ) { return (description = desc); }
 
     String getConfigSubtopic() { return getItemID(); }
     void setConfigSubtopic(const String &newSt) { setItemID(newSt); }
     
-    virtual boolean isConfigMessage(const String &topic, const JsonObject &message ) override { return (topic.endsWith(getConfigSubtopic()) ); }
+    virtual boolean isConfigMessage(const String &topic, const JsonObject &message ) override { 
+      return (topic.equals(this->getItemID()) || topic.endsWith(getConfigSubtopic()) ); 
+    }
     /*  Configuration hook - override in descendant to do any additional config - return true to start the 
      *   controller.  If returns false - controller may still be configured, but needs to be started 
      *   manually by calling start() to begin handling updates.
@@ -93,9 +95,9 @@ class QNodeItemController : public QNodeItem {
       }
     }
 
-    virtual void onItemStateChange( const String &stateValue ) { publishItem( stateTopic, stateValue ); }
-    virtual void onItemStateChange(const String &stateName, const String &stateValue) { if (stateTopic != "") { publishItem( stateTopic, stateName, stateValue, statePubFormat[PUB_STATE] ); } }
-    virtual void onItemStateChange( const JsonObject &stateMessage ) { if (stateTopic != "") { publish( stateTopic, stateMessage, true ); } }
+    virtual void onItemStateChange( const String &stateValue ) { this->publishItem( stateTopic, stateValue ); }
+    virtual void onItemStateChange(const String &stateName, const String &stateValue) { if (stateTopic != "") { this->publishItem( stateTopic, stateName, stateValue, statePubFormat[PUB_STATE] ); } }
+    virtual void onItemStateChange( const JsonObject &stateMessage ) { if (stateTopic != "") { this->publish( stateTopic, stateMessage, true ); } }
     
     /* stateDetail is published one level below the stateTopic (ex:  /home/sensor/state/<detailName>)
      *    This allows for publishing further detail regarding the state of an item - potentially when
@@ -107,8 +109,10 @@ class QNodeItemController : public QNodeItem {
     virtual void onItemStateDetail(const String &detailName, const String &detailValue );
     virtual void onItemStateDetail( const String detailName, const JsonObject &detailMessage );       
 
-    
-    virtual void onItemAttach( QNodeController *owner ) override { addTopic( owner->getHostConfigBaseTopic()+"/"+getConfigSubtopic() ); }
+
+    virtual void onItemAttach( QNodeController *owner ) override { 
+      logMessage(QNodeController::LOGLEVEL_DEBUG, "Subscribing to config topic: " + owner->getHostConfigBaseTopic()+QNodeController::slash+this->getConfigSubtopic()); 
+      this->addTopic( owner->getHostConfigBaseTopic()+QNodeController::slash+this->getConfigSubtopic() ); }
   
     virtual boolean isCommandMessage( const String &topic ) { 
       return(
@@ -158,27 +162,27 @@ class QNodeItemController : public QNodeItem {
           k += ".";
           k += String(kvp.key().c_str());
           JsonObject o = kvp.value().as<JsonObject>();
-          onItemCommandObject( k, o );
+          this->onItemCommandObject( k, o );
         }
         else {
           JsonVariant v = kvp.value();
           String k = String(kvp.key().c_str());
-          onItemCommandElement( context, k, v );
+          this->onItemCommandElement( context, k, v );
         }
       }
     }
     
     virtual void onItemCommand(const JsonObject &message) { 
-      onItemCommandObject(String(""), message); 
+      this->onItemCommandObject(String(""), message); 
     }
     
     void command( const String &cmd, boolean bypass );
     void command( const String &cmd ) { command( cmd, false); }
     
     virtual void logItemEvent(const String &eventName, const String &addtlAttributes );
-    virtual void logItemEvent(const String &eventName) { logItemEvent( eventName, "" ); }
+    virtual void logItemEvent(const String &eventName) override { this->logItemEvent( eventName, "" ); }
 
-    virtual void onMessage( const String &topic, const String &message ) override { if (isCommandMessage(topic)) { logItemEvent( "Invalid Command Message" ); }}
+    virtual void onMessage( const String &topic, const String &message ) override { if (this->isCommandMessage(topic)) { this->logItemEvent( "Invalid Command Message" ); }}
 
     virtual void fillItemProperties( JsonObject &props ) override;
 
