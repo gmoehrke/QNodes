@@ -70,7 +70,7 @@ void QNodeItemController::onItemConfig( const JsonObject &message) {
         logMessage(QNodeController::LOGLEVEL_DEBUG, "Starting Item Controller...");
         this->start(); 
         #ifdef QNODE_DEBUG_VERBOSE
-        logMessage(QNodeController::LOGLEVEL_DEBUG"  Item started!");
+        logMessage(QNodeController::LOGLEVEL_DEBUG, "  Item started!");
         #endif
         if ( message.containsKey("init") ) {
           #ifdef QNODE_DEBUG_VERBOSE

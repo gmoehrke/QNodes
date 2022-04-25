@@ -1,7 +1,5 @@
 #ifndef QNODES_H
 #define QNODES_H
-
-#define QNODE_VERSION F("1.3.0")
 /* 
  #define MQTT_MAX_PACKET_SIZE 768 // Note:  This DOES NOT overide the setting in PubSubClient.h - it gets compiled after So This setting MUST BE 
                                   //        updated manually in PubSubClient.h - Otherwise longer messages will not be received.  When this happens
@@ -41,7 +39,7 @@ class QNodeObject {
      virtual void publish( const String &topic, const String &msg, bool retain );
      virtual void publish( const String &topic, const JsonObject &msg, bool retain );
 
-     virtual void logMessage( uint8_t level, const String &msg );
+     virtual void logMessage( uint8_t level, const String &msg, bool forceToSerial = false ); 
      virtual void logMessage( const String &msg );
      virtual void logMessage( const char *msg );
      virtual void logMessage( uint8_t level, const char *msg );
@@ -110,6 +108,14 @@ class QNodeActor : virtual public QNodeObject {
     unsigned long cycleRollover = 0;
 };
 
+/*  This is the foundation for all "processing" items.  The controller contains a list of all items.  
+    During the primary processing loop, the controller iterates through that list and calls each
+    item's Update() method.
+
+    Note that the controller itself (QNodeController) is a descendant of this class - meaning that 
+    the controller itself has an entry in the item list and it's update() method will be called
+    during the main loop as well.
+*/
 class QNodeItem : public QNodeActor, public QNodeObserver {
   friend QNodeController;
   public:
@@ -155,7 +161,7 @@ class QNodeItem : public QNodeActor, public QNodeObserver {
     virtual void onConfig( const String &topic, const JsonObject &message ) override { 
       if (this->isConfigMessage( topic, message )) 
       {  
-         if (!topic.equals("internal")) 
+         if (!topic.equals(this->getItemID())) 
             {
               this->writeItemConfig(message); 
             }
@@ -264,7 +270,7 @@ public:
   void mqtt_publish( const String &topic, const String &msg, bool retain );
   void mqtt_publish( const String &topic, const JsonObject &msg, bool retain );
 
-  void logMessage( uint8_t level, const String &msg ) override;
+  void logMessage( uint8_t level, const String &msg, bool forceToSerial = false ) override;
   void logMessage( const String &msg ) override { logMessage( LOGLEVEL_INFO, msg );}
   void logMessage( const char *msg ) override { String message = String(msg); logMessage( message ); }
   void logMessage( uint8_t level, const char *msg ) override { String message = String(msg); logMessage( level, message ); }

@@ -8,7 +8,7 @@
 void QNodeObject::publish( const String &topic, const String &msg, bool retain ) { if (owner) { owner->mqtt_publish( topic, msg, retain); } }
 void QNodeObject::publish( const String &topic, const JsonObject &msg, bool retain ) { if (owner) { owner->mqtt_publish( topic, msg, retain); } }
 
-void QNodeObject::logMessage( uint8_t level, const String &msg ) { if (owner) { owner->logMessage( level, msg ); } }
+void QNodeObject::logMessage( uint8_t level, const String &msg, bool forceToSerial) { if (owner) { owner->logMessage( level, msg, forceToSerial ); } }
 void QNodeObject::logMessage( const String &msg ) { if (owner) {owner->logMessage(msg); } }
 void QNodeObject::logMessage( const char *msg ) { if (owner) { owner->logMessage( msg ); } }
 void QNodeObject::logMessage( uint8_t level, const char *msg ) { if (owner) {owner->logMessage( level, msg ); } }
@@ -285,21 +285,34 @@ void QNodeController::writeHostName(String newHost) {
 
 bool QNodeController::startWifi() {
   // Connect to WiFi network
-  logMessage(LOGLEVEL_INFO, "Establishing WiFi connection to "+ssid+" ("+netPassword+")" );
+  this->logMessage(LOGLEVEL_INFO, "Establishing WiFi connection to "+ssid+" ("+netPassword+")" );
   WiFi.mode(WIFI_STA);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
-  readHostName();
+  // readHostName();
   WiFi.begin(ssid.c_str(), netPassword.c_str());
-  while (!wifiConnected()) {
-    delay(500);
-    logMessage(F("...waiting for connect..."));
+  StepTimer logTimer(1000, true );
+  while (!wifiConnected()) {    
+    if (logTimer.isUp()) {
+      logMessage(F("...waiting for connect..."));
+      logTimer.step();
+      yield();
+    }
+    else {      
+      for (auto i : items) {
+        if (i != this) {
+          if (!wifiConnected()) { i->actorUpdate(); }
+        }    
+        yield();
+      } 
+    }
   }
-  currHostName = String(WiFi.hostname());
+  logTimer.stop();
+  currHostName = WiFi.hostname();
   currIPAddr = WiFi.localIP().toString();
   currMACAddr = WiFi.macAddress();
-  logMessage(LOGLEVEL_INFO, "WiFi connected");
-  logMessage(LOGLEVEL_INFO, "IP address: " + WiFi.localIP().toString());
-  logMessage(LOGLEVEL_INFO, "Host name: "+String(currHostName) );  
+  this->logMessage(LOGLEVEL_INFO, "WiFi connected", true);
+  this->logMessage(LOGLEVEL_INFO, "IP address: " + WiFi.localIP().toString(), true);
+  this->logMessage(LOGLEVEL_INFO, "Host name: "+String(currHostName), true );  
   return(WiFi.status() == WL_CONNECTED);
 }
 
@@ -446,12 +459,12 @@ String QNodeController::getFormattedTimestamp() {
   return(result);    
 }
 
-void QNodeController::logMessage( uint8_t level, const String &msg ) {
+void QNodeController::logMessage( uint8_t level, const String &msg, bool forceToSerial ) {
     String msgStr;
     if (logLevel >= level) {
       msgStr = this->getFormattedTimestamp();      
       msgStr.concat( msg );
-      if ( (strcmp(logTopic.c_str(), LOG_TO_SERIAL)==0)  || (!mqttConnected()) )
+      if ( (strcmp(logTopic.c_str(), LOG_TO_SERIAL)==0)  || (!mqttConnected() || forceToSerial ) )
         Serial.println( msgStr );
       else {
         String topic = getHostLogTopic();;
@@ -571,12 +584,12 @@ void QNodeController::dispatchMessage( String topic, String message ) {
       auto error = deserializeJson( doc, message );
       #ifdef QNODE_DEBUG_VERBOSE
       if (error) {
-        this->logMessage(LOGLEVEL_DEBUG, "Not a valid JSON message.");
+        this->logMessage(LOGLEVEL_DEBUG, "Not a valid JSON message from " + topic);
         this->logMessage(LOGLEVEL_DEBUG, message );
         this->logMessage(LOGLEVEL_DEBUG, error.c_str() );
       }
       else {
-        this->logMessage( LOGLEVEL_DEBUG, "Sucessfully parsed incoming JSON message.");
+        this->logMessage( LOGLEVEL_DEBUG, "Sucessfully parsed incoming JSON message from " + topic);
         this->logMessage( LOGLEVEL_DEBUG, "JSON Buffer Size:  " + String(measureJson(doc)) );
       }
       #endif 
@@ -584,9 +597,12 @@ void QNodeController::dispatchMessage( String topic, String message ) {
       if ( topic.startsWith(getHostConfigBaseTopic())) {        
         for (auto i : items) 
         {
+          #ifdef QNODE_DEBUG_VERBOSE
+          this->logMessage(LOGLEVEL_DEBUG, "Checking if config item for " + i->getItemID());
+          #endif
           if (error) { 
             (i)->onConfig(topic, message) ; }
-          else if (topic.endsWith(i->getItemID()) || (topic.endsWith("config") && i==this)) { 
+          else if (topic.endsWith("internal") || topic.endsWith(i->getItemID()) || ((topic.endsWith("config") && i==this))) { 
             logMessage( LOGLEVEL_DEBUG, "Sending config message from topic "+topic+" to item " + (i)->getItemID() + ": " + message );
             (i)->onConfig(topic, root ); 
           }
@@ -606,10 +622,11 @@ void QNodeController::dispatchMessage( String topic, String message ) {
 }
 
 void QNodeController::mqttCallback( char* topic, byte* payload, unsigned int length ) {
-    #ifdef QNODE_DEBUG_VERBOSE
-    logMessage(LOGLEVEL_DEBUG, "** mqttCallback:  callback executed - topic:  " + String(topic));
-    #endif
+ 
     String stTopic = String(topic);
+    #ifdef QNODE_DEBUG_VERBOSE
+    logMessage(LOGLEVEL_DEBUG, "** mqttCallback:  callback executed - topic:  " + stTopic);
+    #endif
     char message[length + 1];
     for (unsigned int i = 0; i < length; i++) {
       message[i] = (char)payload[i];
@@ -626,7 +643,7 @@ void QNodeController::mqttCallback( char* topic, byte* payload, unsigned int len
       this->logMessage(LOGLEVEL_DEBUG, "******************************");
       #endif
       
-      dispatchMessage( stTopic, stMessage );
+      this->dispatchMessage( stTopic, stMessage );
     }
 }
 
@@ -891,11 +908,16 @@ void QNodeController::update() {
        for (auto i : items) {
           logMessage(QNodeController::LOGLEVEL_DEBUG, "Item: " + i->getItemID() + " cycles: " + String((unsigned long)i->getNumCycles()));
        }
-       connect();    
+       connect();   
+       for (auto i : items) {
+          String st = "Item: " + i->getItemID() + " cycles: " + String((unsigned long)i->getNumCycles());
+          logMessage(QNodeController::LOGLEVEL_DEBUG, st.c_str());
+       } 
        String topic=getHostConfigTopic();
        addTopic( topic ); 
        this->subUnsubAllTopics(true);
-       pulseTimer.start();       
+       pulseTimer.start();   
+       mqttClient->loop();    
        for (auto i : items) {
         i->onItemStateUpdate();
       }
@@ -968,7 +990,9 @@ void QNodeController::loop() {
       }
       if (initTimer.isStarted()) {
           for (auto i : items ) {            
-            i->readItemConfig(); 
+            if (i != this) {
+              i->readItemConfig(); 
+            }
           }
       }
       #ifdef QNODE_DEBUG_VERBOSE

@@ -1,4 +1,4 @@
-#define SKETCH_VERSION "QNode Master Firmware 1.3.0"
+#define SKETCH_VERSION "QNode Master Firmware 1.4.0"
 
 #include <ArduinoJson.h>
 #include "FlexTimer.h"
@@ -30,6 +30,7 @@ void loop() {
   if (!qnc) {
     qnc = new QNodeController( ssid, password, mqtt_server, mqtt_username, mqtt_password, mqtt_t_hosts );
     qnc->setSketchVersion( SKETCH_VERSION );
+    //qnc->logTopic = QNodeController::LOG_TO_SERIAL;
     qnc->setLogLevel( QNodeController::LOGLEVEL_DEBUG ) ;
   }
   else {

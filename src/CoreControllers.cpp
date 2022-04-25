@@ -928,7 +928,10 @@ boolean QFXController::onControllerConfig( const JsonObject &msg ) {
             }
           }
         } 
-        this->start();         
+        #ifdef QNODE_DEBUG_VERBOSE
+        logMessage(QNodeController::LOGLEVEL_DEBUG,"Starting LED Controller.");
+        #endif
+        //this->start();         
         FFXController::update();
         #ifdef QNODE_DEBUG_VERBOSE
         logMessage(QNodeController::LOGLEVEL_DEBUG,"Done with LED Controller config.");
@@ -968,10 +971,20 @@ void QFXController::onFXStateChange(FFXSegment *segment) {
        root["chase_dot_spacing"] = ((ChaseFX *)currEffect)->getDotSpacing();
        root["chase_blur"] = ((ChaseFX *)currEffect)->getBlurAmount();
     }
+    if (currEffect->getFXID()==MOTION_FX_ID) {
+       root["motion_range"] = ((MotionFX *)currEffect)->getNormalizationRange();
+       root["motion_hue_shift"] = (((MotionFX *)currEffect)->getHueShift() ? "true" : "false");
+       root["motion_shift_time"] = ((MotionFX *)currEffect)->getShiftTime();
+       root["motion_saturation_min"] = ((MotionFX *)currEffect)->getSaturationMin();
+    }
     else {
        root["chase_dot_width"] = 0;
        root["chase_dot_spacing"] = 0;
        root["chase_blur"] = 0;
+       root["motion_range"] = 0;
+       root["motion_hue_shift"] = "false";
+       root["motion_shift_time"] = 0;
+       root["motion_saturation_min"] = 0;
     }
     root.createNestedObject("color");
     FFXColor::FFXColorMode currMode = currEffect->getFXColor().getColorMode();
@@ -1032,13 +1045,15 @@ void QFXController::onFXEvent( const String &segment, FXEventType event, const S
         case FX_RESUMED           : { stEvent = F("Effect Resumed"); break; }   
         case FX_PARAM_CHANGE      : { stEvent = "Parameter changed: "+name; break; }
         case FX_BRIGHTNESS_CHANGED: { stEvent = F("Brightness Changed"); break; }
-        case FX_LOG               : { QNodeItemController::logMessage( QNodeController::LOGLEVEL_INFO, "" + name); }
+        case FX_LOG               : { this->logMessage( QNodeController::LOGLEVEL_INFO, "" + name); break; }
         case FX_LOCAL_BRIGHTNESS_ENABLED: { break; }
         case FX_OPACITY_CHANGED : { break; }
       }
-    if (stEvent != "")   {
-      logItemEvent( (segment =="" ? "" : segment + ": ") + name + " " + stEvent );
-    }
+    if (this->getOwner()->mqttConnected()) {
+      if (stEvent != "")   {
+        logItemEvent( (segment =="" ? "" : segment + ": ") + name + " " + stEvent );
+      }
+    } 
   }
 
 boolean QFXController::isEffect( String tgtFXName, int tgtFXID, String FXName, int FXID ) {
@@ -1056,7 +1071,7 @@ void QFXController::onItemCommand( const JsonObject &msg ) {
     String msgStr;    
    
     serializeJson( msg, msgStr );
-    logMessage(QNodeController::LOGLEVEL_DEBUG, "LEDStripController - Command Received: " + msgStr );
+    this->logMessage(QNodeController::LOGLEVEL_DEBUG, "LEDStripController - Command Received: " + msgStr );
 
     if (configured) {    
       std::vector<FFXSegment *> segs = std::vector<FFXSegment *>();
@@ -1093,8 +1108,11 @@ void QFXController::onItemCommand( const JsonObject &msg ) {
           if (isEffect(DIM_PAL_FX_NAME, DIM_PAL_FX_ID, msg["effect"], msg["effectid"])) { newFX = new DimUsingPaletteFX( currSeg->getLength() ); }
           if (isEffect(PACIFICA_FX_NAME, PACIFICA_FX_ID, msg["effect"], msg["effectid"])) { newFX = new PacificaFX( currSeg->getLength() ); }
           if (isEffect(PALETTE_FX_NAME, PALETTE_FX_ID, msg["effect"], msg["effectid"])) { newFX = new PaletteFX( currSeg->getLength() ); }
+          #ifdef QNODE_DEBUG_VERBOSE
+          this->logMessage( QNodeController::LOGLEVEL_DEBUG, "New Effect constructed - setting parameters");
+          #endif
           if (newFX) {
-            if (getFX()) {
+            if (currEffect) {
               newFX->setSpeed(currEffect->getSpeed());
             }
             currSeg->setFX(newFX);
@@ -1134,6 +1152,15 @@ void QFXController::onItemCommand( const JsonObject &msg ) {
         }
         if (msg.containsKey("motion_range") && (currEffect->getFXName()==MOTION_FX_NAME)) {
           ((MotionFX *)currEffect)->setNormalizationRange( msg["motion_range"] );
+        }
+        if (msg.containsKey("motion_hue_shift") && (currEffect->getFXName()==MOTION_FX_NAME)) {
+          ((MotionFX *)currEffect)->setHueShift( msg["motion_hue_shift"]=="true" || msg["motion_hue_shift"]=="yes");
+        }
+        if (msg.containsKey("motion_shift_time") && (currEffect->getFXName()==MOTION_FX_NAME)) {
+          ((MotionFX *)currEffect)->setShiftTime( msg["motion_shift_time"]);
+        }
+         if (msg.containsKey("motion_saturation_min") && (currEffect->getFXName()==MOTION_FX_NAME)) {
+          ((MotionFX *)currEffect)->setSaturationMin( msg["motion_saturation_min"]);
         }
         if (msg.containsKey("color")) {
           String cmode = msg["color"]["mode"].as<String>();
@@ -1218,7 +1245,8 @@ void QFXController::onItemCommand( const JsonObject &msg ) {
             if (lag) { newFX->setLag( lag ); }
             currSeg->setOverlay( newFX );
           }
-        }      
+        } 
+        onFXStateChange(currSeg);     
       }
       if (msg.containsKey("temperature")) {
         if (msg["temperature"]==F("Candle")) { FastLED.setTemperature(Candle); }
@@ -1235,6 +1263,7 @@ void QFXController::onItemCommand( const JsonObject &msg ) {
       }
     }
 }
+
 void QFXController::onItemStateUpdate() {
   for (auto seg : segments) {
     this->onFXStateChange(seg);
