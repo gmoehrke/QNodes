@@ -301,8 +301,8 @@ bool QNodeController::startWifi() {
       for (auto i : items) {
         if (i != this) {
           if (!wifiConnected()) { i->actorUpdate(); }
+          yield();
         }    
-        yield();
       } 
     }
   }
@@ -313,6 +313,7 @@ bool QNodeController::startWifi() {
   this->logMessage(LOGLEVEL_INFO, "WiFi connected", true);
   this->logMessage(LOGLEVEL_INFO, "IP address: " + WiFi.localIP().toString(), true);
   this->logMessage(LOGLEVEL_INFO, "Host name: "+String(currHostName), true );  
+  Serial.end();
   return(WiFi.status() == WL_CONNECTED);
 }
 
@@ -500,9 +501,10 @@ void QNodeController::detachItem( QNodeItem *item ) {
 boolean QNodeController::topicInUse(const String &topic ) {
   boolean result = false;
   for (auto i : items) {
-    if (std::find(i->getTopicList().begin(), i->getTopicList().end(), topic) != i->getTopicList().end() )
+    if (std::find(i->getTopicList().begin(), i->getTopicList().end(), topic) != i->getTopicList().end() ) {
       result = true;
       break;
+    }
   }
   return result;
 }
@@ -947,10 +949,10 @@ void QNodeController::update() {
           if (ntpConnected()) {
           updateTime();
           }
-        }
-        if (pulseTimer.isUp()) {
-          publishState();
-          pulseTimer.step();
+          if (pulseTimer.isUp()) {
+            publishState();
+            pulseTimer.step();
+          }
         }
       }
     }
@@ -966,7 +968,8 @@ QNodeItem *QNodeController::findVectorItem(std::vector<QNodeItem *> list, QNodeI
 void QNodeController::loop() {
     for( auto i : items )
     { 
-       i->actorUpdate();     
+       i->actorUpdate(); 
+       yield();    
     } 
     if (pendingItems.size() > 0) {
       logMessage(LOGLEVEL_DEBUG, F("Configuring controller:  attaching pending Items:"));

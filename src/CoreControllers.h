@@ -33,15 +33,22 @@
 #endif
 
 #ifdef QNC_LEDSTRIP
-#define FASTLED_ESP8266_RAW_PIN_ORDER
-//#define FASTLED_INTERRUPT_RETRY_COUNT 0
 //#define FASTLED_ESP8266_D1_PIN_ORDER
+#define FASTLED_ALLOW_INTERRUPTS 1
+#define FASTLED_INTERRUPT_RETRY_COUNT 1
+//#define INTERRUPT_THRESHOLD 1
 #define NUM_LEDS_DEFAULT    100
-#define DATA_PIN_DEFAULT    D5
-#define CHIPSET_DEFAULT     WS2811
+#define DATA_PIN_DEFAULT    5 //D5
+#define CHIPSET_DEFAULT     WS2812B
 #define COLOR_ORDER_DEFAULT BRG
 
+#pragma GCC diagnostic push
+//#pragma GCC diagnostic ignored "-Wregister"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+//#pragma GCC diagnostic ignored "-Wmisleading-indentation"
+//#pragma GCC diagnostic ignored "-Wclass-memaccess"
 #include "FFXController.h"
+#pragma GCC diagnostic pop
 #endif
 
 class CoreControllers {

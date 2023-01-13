@@ -874,7 +874,8 @@ void QFXController::registerType() {
 
 QFXController::QFXController() : QNodeItemController( "LEDStrip" ), FFXController()  {
       setName(String(F("Led StripFX Controller")));
-      setUnthrottled( true );             // No timer used for calls to update() - FXController handles necessary timing to send LED commands
+      setUnthrottled( false );             // No timer used for calls to update() - FXController handles necessary timing to send LED commands
+      setUpdateInterval(10);
       leds = nullptr;
     }
     
@@ -893,29 +894,77 @@ boolean QFXController::onControllerConfig( const JsonObject &msg ) {
         if (leds) { 
           delete [] leds; 
           leds = nullptr; 
-        }
+        }        
         logMessage(QNodeController::LOGLEVEL_INFO, "Allocating LED buffer: " + String(ESP.getFreeHeap()) + " available heap.  Leds: " + String(pixels) );
         leds = new CRGB[pixels];         
         fill_solid( leds, pixels, CRGB::Black );
         logMessage(QNodeController::LOGLEVEL_INFO, "LED Buffer allocated: " + String(ESP.getFreeHeap()) + " available heap.  Leds:  " + String(pixels) );
-        if (msg["colororder"] == "brg") { 
-          FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, BRG>(leds, pixels).setCorrection(TypicalLEDStrip ); 
+        
+        //String cs_str = CHIPSET_DEFAULT;
+        //if (msg.containsKey("chipset")) { 
+        //  cs_str = msg["chipset"].as<String>(); 
+        // }
+        //if (CHIPSET_DEFAULT == "WS2812") {
+          if (msg["colororder"] == "brg") { 
+            FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, BRG>(leds, pixels).setCorrection(TypicalLEDStrip ); 
+          }
+          else if (msg["colororder"] == "grb") { 
+            FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, GRB>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }
+          else if (msg["colororder"] == "rbg") { 
+            FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, RBG>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }
+          else if (msg["colororder"] == "gbr") { 
+            FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, GBR>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }
+          else if (msg["colororder"] == "bgr") { 
+            FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, BGR>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }        
+          else { 
+            FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, RGB>(leds, pixels).setCorrection(TypicalLEDStrip);
+          }
+        //}
+        /* else if ((cs_str == "WS2812B")) {
+          if (msg["colororder"] == "brg") { 
+            FastLED.addLeds<WS2812B, DATA_PIN_DEFAULT, BRG>(leds, pixels).setCorrection(TypicalLEDStrip ); 
+          }
+          else if (msg["colororder"] == "grb") { 
+            FastLED.addLeds<WS2812B, DATA_PIN_DEFAULT, GRB>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }
+          else if (msg["colororder"] == "rbg") { 
+            FastLED.addLeds<WS2812B, DATA_PIN_DEFAULT, RBG>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }
+          else if (msg["colororder"] == "gbr") { 
+            FastLED.addLeds<WS2812B, DATA_PIN_DEFAULT, GBR>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }
+          else if (msg["colororder"] == "bgr") { 
+            FastLED.addLeds<WS2812B, DATA_PIN_DEFAULT, BGR>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }        
+          else { 
+            FastLED.addLeds<WS2812B, DATA_PIN_DEFAULT, RGB>(leds, pixels).setCorrection(TypicalLEDStrip);
+          }
         }
-        else if (msg["colororder"] == "grb") { 
-          FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, GRB>(leds, pixels).setCorrection(TypicalLEDStrip); 
+        if ((cs_str == "WS2811")) {
+          if (msg["colororder"] == "brg") { 
+            FastLED.addLeds<WS2811, DATA_PIN_DEFAULT, BRG>(leds, pixels).setCorrection(TypicalLEDStrip ); 
+          }
+          else if (msg["colororder"] == "grb") { 
+            FastLED.addLeds<WS2811, DATA_PIN_DEFAULT, GRB>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }
+          else if (msg["colororder"] == "rbg") { 
+            FastLED.addLeds<WS2811, DATA_PIN_DEFAULT, RBG>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }
+          else if (msg["colororder"] == "gbr") { 
+            FastLED.addLeds<WS2811, DATA_PIN_DEFAULT, GBR>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }
+          else if (msg["colororder"] == "bgr") { 
+            FastLED.addLeds<WS2811, DATA_PIN_DEFAULT, BGR>(leds, pixels).setCorrection(TypicalLEDStrip); 
+          }        
+          else { 
+            FastLED.addLeds<WS2811, DATA_PIN_DEFAULT, RGB>(leds, pixels).setCorrection(TypicalLEDStrip);
+          }
         }
-        else if (msg["colororder"] == "rbg") { 
-          FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, RBG>(leds, pixels).setCorrection(TypicalLEDStrip); 
-        }
-        else if (msg["colororder"] == "gbr") { 
-          FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, GBR>(leds, pixels).setCorrection(TypicalLEDStrip); 
-        }
-        else if (msg["colororder"] == "bgr") { 
-          FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, BGR>(leds, pixels).setCorrection(TypicalLEDStrip); 
-        }        
-        else { 
-          FastLED.addLeds<CHIPSET_DEFAULT, DATA_PIN_DEFAULT, RGB>(leds, pixels).setCorrection(TypicalLEDStrip);
-        }
+        */
         FastLED.setDither(DISABLE_DITHER);
         FFXController::initialize( new FFXFastLEDPixelController( leds, pixels ) );
         configured = true;        
@@ -971,18 +1020,20 @@ void QFXController::onFXStateChange(FFXSegment *segment) {
        root["chase_dot_spacing"] = ((ChaseFX *)currEffect)->getDotSpacing();
        root["chase_blur"] = ((ChaseFX *)currEffect)->getBlurAmount();
     }
-    if (currEffect->getFXID()==MOTION_FX_ID) {
-       root["motion_range"] = ((MotionFX *)currEffect)->getNormalizationRange();
-       root["motion_hue_shift"] = (((MotionFX *)currEffect)->getHueShift() ? "true" : "false");
-       root["motion_shift_time"] = ((MotionFX *)currEffect)->getShiftTime();
-       root["motion_saturation_min"] = ((MotionFX *)currEffect)->getSaturationMin();
-    }
     else {
        root["chase_dot_width"] = 0;
        root["chase_dot_spacing"] = 0;
        root["chase_blur"] = 0;
+    }
+    if (currEffect->getFXID()==MOTION_FX_ID) {
+       root["motion_range"] = ((MotionFX *)currEffect)->getNormalizationRange();
+       root["motion_hue_shift"] = (((MotionFX *)currEffect)->getHueShift() ? "on" : "off");
+       root["motion_shift_time"] = ((MotionFX *)currEffect)->getShiftTime();
+       root["motion_saturation_min"] = ((MotionFX *)currEffect)->getSaturationMin();
+    }
+    else {
        root["motion_range"] = 0;
-       root["motion_hue_shift"] = "false";
+       root["motion_hue_shift"] = "off";
        root["motion_shift_time"] = 0;
        root["motion_saturation_min"] = 0;
     }
@@ -1108,6 +1159,7 @@ void QFXController::onItemCommand( const JsonObject &msg ) {
           if (isEffect(DIM_PAL_FX_NAME, DIM_PAL_FX_ID, msg["effect"], msg["effectid"])) { newFX = new DimUsingPaletteFX( currSeg->getLength() ); }
           if (isEffect(PACIFICA_FX_NAME, PACIFICA_FX_ID, msg["effect"], msg["effectid"])) { newFX = new PacificaFX( currSeg->getLength() ); }
           if (isEffect(PALETTE_FX_NAME, PALETTE_FX_ID, msg["effect"], msg["effectid"])) { newFX = new PaletteFX( currSeg->getLength() ); }
+          if (isEffect(FIRE_FX_NAME, FIRE_FX_ID, msg["effect"], msg["effectid"])) { newFX = new FireFX( currSeg->getLength(), 500, true ); }
           #ifdef QNODE_DEBUG_VERBOSE
           this->logMessage( QNodeController::LOGLEVEL_DEBUG, "New Effect constructed - setting parameters");
           #endif
@@ -1196,7 +1248,7 @@ void QFXController::onItemCommand( const JsonObject &msg ) {
             else if (cpal.equals("rwb")) { currEffect->getFXColor().setPalette( ::rwb_p, (crange==0 ? ::rwb_size : crange) ); }
             else if (cpal.equals("valentine")) { currEffect->getFXColor().setPalette( ::Valentine_p, (crange==0 ? ::valentine_size : crange) ); }
             else if (cpal.equals("irish")) { currEffect->getFXColor().setPalette( ::Irish_p, (crange==0 ? ::irish_size : crange) ); }
-            else { currEffect->getFXColor().setPalette(  NamedPalettes::getInstance()[cpal]); }
+            else { currEffect->getFXColor().setPalette(  NamedPalettes::getInstance()[cpal], (crange==0 ? 16 : crange) ); }
           }
           if ( ccolors != 0) { currEffect->getFXColor().setPaletteRange( ccolors ); }
         }
