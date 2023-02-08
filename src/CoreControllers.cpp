@@ -579,14 +579,22 @@ void RelayController::setRelay( boolean value ) {
   }
 
 boolean RelayController::onControllerConfig( const JsonObject &msg ) {
+        onValue = HIGH;
+        offValue = LOW;
         if (msg.containsKey("rlypin")) {
           pin =  msg["rlypin"];
           pinMode( pin, OUTPUT );
-          String st = String(F("  relay writing on pin: ")) + String(pin);
+          if (msg.containsKey("mode")) {
+            if (msg["mode"]=="NC")  {
+              onValue = LOW;
+              offValue = HIGH;
+            }
+          }
+          String st = String(F("  relay writing on pin: ")) + String(pin);  
           logMessage( st );
           digitalWrite( pin, relayState ? onValue : offValue );
         }
-        return true;
+        return true; 
   }
 
 void RelayController::onItemCommand( const JsonObject& message ) {

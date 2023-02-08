@@ -13,9 +13,9 @@
 #define QNC_DHT                 // Include support for single pin DHT temp/humidity sensor (using DHT Sensor lib)
 #define QNC_RELAY               // Include support for single pin relay 
 #define QNC_OAS                 // Include support for single pin Obstacle Avoidance Sensor 
-#define QNC_MOCHA_X10           // Include support for sending X10 commands to MocahD server daemon
+//#define QNC_MOCHA_X10           // Include support for sending X10 commands to MocahD server daemon
 #define QNC_TPLINK              // Include support for TPLink HS### Switches
-#define QNC_LEDSTRIP            // Include support for controlling LED Strip/pixels via FastFX library
+//#define QNC_LEDSTRIP            // Include support for controlling LED Strip/pixels via FastFX library
 
 #include "QNodeItemController.h"
 #include "LED/MonochromeLED.h"

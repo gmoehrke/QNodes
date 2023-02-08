@@ -161,6 +161,9 @@ class QNodeItem : public QNodeActor, public QNodeObserver {
     virtual void onConfig( const String &topic, const JsonObject &message ) override { 
       if (this->isConfigMessage( topic, message )) 
       {  
+         //  If item is ot beign configured from filesystem - we will write to the 
+         //  config file with the new configuration.  Note:  When config is read from filesystem, 
+         //  the item ID is sent to onConfig as the topic.
          if (!topic.equals(this->getItemID())) 
             {
               this->writeItemConfig(message); 
