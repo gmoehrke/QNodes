@@ -3,3 +3,5 @@ examples/qn_config.sjson/634740874.205074
 examples/qn_config.sjson/data
 examples/qn_config.sjson/metaData
 .DS_Store
+.pio/*
+.vscode/*
